@@ -812,6 +812,84 @@ async def update_leaderboard():
 @update_leaderboard.before_loop
 async def before_update_leaderboard():
     await bot.wait_until_ready()
+    import discord
+from discord.ui import Button, View
+
+# ==========================================
+# 🎫 チケット発行機能
+# ==========================================
+
+# ① チケット発行用のボタンと処理
+class TicketView(View):
+    def __init__(self):
+        super().__init__(timeout=None) # 時間経過で消えないようにする
+
+    @discord.ui.button(label="🎫 チケットを発行する", style=discord.ButtonStyle.green, custom_id="create_ticket_button")
+    async def create_ticket(self, interaction: discord.Interaction, button: Button):
+        guild = interaction.guild
+        member = interaction.user
+
+        # すでに同じ名前のチャンネルがないか確認（重複作成を防ぐ）
+        channel_name = f"ticket-{member.name.lower()}"
+        existing_channel = discord.utils.get(guild.text_channels, name=channel_name)
+        if existing_channel:
+            await interaction.response.send_message(f"すでにあなた専用のチケットチャンネルが存在します: {existing_channel.mention}", ephemeral=True)
+            return
+
+        # 権限の設定：本人と管理者だけが見られるようにする
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False), # 一般メンバーは閲覧不可
+            member: discord.PermissionOverwrite(read_messages=True, send_messages=True), # 本人は閲覧・書き込み可能
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True) # ボットも操作可能に
+        }
+
+        # カテゴリを指定したい場合は category=... を追加できますが、今回はサーバーの一番下に作成します
+        ticket_channel = await guild.create_text_channel(
+            name=channel_name,
+            overwrites=overwrites,
+            topic=f"作成者: {member.display_name} (ID: {member.id})"
+        )
+
+        # チケットチャンネル内に案内メッセージと「閉じる」ボタンを置く
+        close_view = TicketCloseView()
+        await ticket_channel.send(
+            f"{member.mention} さん、チケットを作成しました！\n自由にテキストを書き込んでください。\n用事が済んだら下のボタンでチャンネルを閉じることができます。",
+            view=close_view
+        )
+
+        # ボタンを押した本人にだけこっそり通知する
+        await interaction.response.send_message(f"チケットを作成しました！ 👉 {ticket_channel.mention}", ephemeral=True)
+
+
+# ② チケットを閉じる（削除する）ためのボタン
+class TicketCloseView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔒 チケットを閉じる", style=discord.ButtonStyle.red, custom_id="close_ticket_button")
+    async def close_ticket(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message("5秒後にこのチャンネルを削除します...", ephemeral=True)
+        # 少し待ってからチャンネルを削除
+        import asyncio
+        await asyncio.sleep(5)
+        await interaction.channel.delete()
+
+
+# ③ チケット発行ボタンを設置するコマンド（例: !ticket_panel）
+@bot.command(name="ticket_panel")
+async def ticket_panel(ctx):
+    # 管理者だけがパネルを設置できるようにする場合のチェック（必要に応じて外してください）
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("このコマンドは管理者のみ実行できます。", delete_after=5)
+        return
+
+    embed = discord.Embed(
+        title="🎫 お問い合わせ・チケット発行",
+        description="下のボタンを押すと、あなた専用のプライベートチャンネル（テキストを書き込める部屋）が作成されます。\n何か用事がある場合はお気軽にボタンを押してください！",
+        color=0x3498db
+    )
+    view = TicketView()
+    await ctx.send(embed=embed, view=view)
     
 # ==========================================
 # 起動処理 & Webサーバー（Renderスリープ対策用）
