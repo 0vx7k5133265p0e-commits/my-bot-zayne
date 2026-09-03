@@ -819,6 +819,12 @@ async def manual_save(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
 
 # ── ボット起動・サーバー処理 ──
+import os
+import threading
+
+def run_flask():
+    app.run(host="0.0.0.0", port=8000)
+
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     client.run(os.getenv("DISCORD_TOKEN"))
