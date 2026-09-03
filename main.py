@@ -640,51 +640,7 @@ async def rank(interaction: discord.Interaction):
         text += f"**{i}位:** <@{user_id}> - **{points} pt**\n"
 
     await interaction.response.send_message(text)
-
-@client.tree.command(name="clear", description="指定した行数のメッセージを削除します")
-@app_commands.describe(amount="削除するメッセージ数")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def clear(interaction: discord.Interaction, amount: int):
-    if amount < 1 or amount > 100:
-        await interaction.response.send_message("⚠️ 1〜100で指定してください。", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=amount)
-    await interaction.followup.send(f"🧹 **{len(deleted)}件** のメッセージを削除しました！", ephemeral=True)
-
-import discord
-from discord import app_commands
-
-# （※あなたのいままでのインポートや初期設定、変数はそのまま上に書いてある前提です）
-
-
-@client.event
-async def on_ready():
-    print(f"ログインしました: {client.user}")
-    
-    # ── 起動したときにDiscordへコマンドを同期する処理 ──
-    try:
-        synced = await client.tree.sync()
-        print(f"{len(synced)}個のコマンドを同期しました！")
-    except Exception as e:
-        print(f"同期エラー: {e}")
-
-
-# ── （中略：ここに「おみくじ」などの他のコマンドや処理が入っています） ──
-
-
-# ── 一番下の独立した何もない場所に配置するdatasaveコマンド ──
-@client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
-async def manual_save(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=True)
-        return
-
-    try:
-        save_data(data)
-        await interaction.response.send_message("💾 データを手動で保存しました！", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
+)
 # ==========================================
 # 6. ロール付与・認証パネル機能
 # ==========================================
