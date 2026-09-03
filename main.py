@@ -640,7 +640,7 @@ async def rank(interaction: discord.Interaction):
         text += f"**{i}位:** <@{user_id}> - **{points} pt**\n"
 
     await interaction.response.send_message(text)
-)
+
 # ==========================================
 # 6. ロール付与・認証パネル機能
 # ==========================================
