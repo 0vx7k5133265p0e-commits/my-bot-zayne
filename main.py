@@ -44,15 +44,19 @@ def save_data(data):
     except Exception as e:
         print(f"⚠️ 保存エラー: {e}")
 
-def get_user_data(uid: str, data: dict) -> dict:
-    if uid not in data or isinstance(data[uid], int):
-        old_pts = data[uid] if isinstance(data[uid], int) and data[uid] > 0 else INITIAL_POINTS
-        data[uid] = {"points": old_pts, "pekari_stock": 0}
+def get_user_data(uid, data: dict) -> dict:
+    # 念のためuidを必ず文字列に変換する
+    uid_str = str(uid)
+    
+    if uid_str not in data or not isinstance(data[uid_str], dict):
+        data[uid_str] = {"points": INITIAL_POINTS, "pekari_stock": 0}
         save_data(data)
-    elif data[uid]["points"] <= 0:
-        data[uid]["points"] = INITIAL_POINTS
+    elif "points" not in data[uid_str]:
+        data[uid_str]["points"] = INITIAL_POINTS
+        data[uid_str]["pekari_stock"] = 0
         save_data(data)
-    return data[uid]
+        
+    return data[uid_str]
 
 # --- 専用部屋チェック判定 ---
 def is_casino_room(channel: discord.TextChannel) -> bool:
