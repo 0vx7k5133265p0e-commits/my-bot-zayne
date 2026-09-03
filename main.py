@@ -296,20 +296,18 @@ async def slot(interaction: discord.Interaction, bet: int):
         view=view
     )
     
-# --- 管理者用：手動でデータを保存するコマンド ---
-@client.command(name="datasave")
-async def manual_save(ctx):
-    # 管理者だけが実行できるようにするチェック
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.send("このコマンドは管理者のみ実行できます。", delete_after=5)
+    @client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
+async def manual_save(interaction: discord.Interaction):
+    # 管理者チェック
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=True)
         return
 
     try:
-        # ご自身の環境のセーブ関数名に合わせて書き換えてください（例: save_data()など）
-        save_data() 
-        await ctx.send("✅ データを手動で保存しました！")
+        save_data(data)  # データを保存
+        await interaction.response.send_message("✅ データを手動で保存しました！", ephemeral=True)
     except Exception as e:
-        await ctx.send(f"❌ 保存に失敗しました: {e}")
+        await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
         
 # ==========================================
 # 2. ブラックジャック機能
