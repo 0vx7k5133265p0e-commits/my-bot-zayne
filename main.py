@@ -738,27 +738,16 @@ async def setup_roles(
 # ==========================================
 # 起動処理 & Webサーバー（Renderスリープ対策用）
 # ==========================================
-from flask import Flask
+import os
 import threading
 
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
+# Webサーバーを別スレッドで起動（スリープ対策）
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-@client.event
-async def on_ready():
-    await client.tree.sync()
-    print(f"✅ ログイン成功: {client.user.name}")
-    print("🤖 全機能セットアップ完了！")
-
-# Webサーバーを別スレッドで起動
-threading.Thread(target=run_flask).start()
-
-# 環境変数からトークンを取得してBotを起動
-import os
-client.run(os.getenv("DISCORD_TOKEN"))
+if __name__ == '__main__':
+    # 別スレッドでFlaskを動かしつつ
+    threading.Thread(target=run_flask).start()
+    
+    # そのままDiscordボットを起動する
+    client.run(os.getenv("DISCORD_TOKEN"))
