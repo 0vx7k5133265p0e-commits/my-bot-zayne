@@ -297,7 +297,7 @@ async def slot(interaction: discord.Interaction, bet: int):
     )
     
 # --- 管理者用：手動でデータを保存するコマンド ---
-@bot.command(name="datasave")
+@client.command(name="datasave")
 async def manual_save(ctx):
     # 管理者だけが実行できるようにするチェック
     if not ctx.author.guild_permissions.administrator:
