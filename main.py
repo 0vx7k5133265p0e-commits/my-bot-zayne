@@ -204,14 +204,14 @@ def process_slot_spin(uid: str, bet: int, data: dict):
         pekari_msg = f"🔥 **ペカり確変中！** 3つ揃い確定！（残り確変: **{rem}回**）\n"
         msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い！** **+{payout} pt**"
     else:
-        is_pekari = random.random() < 0.07
+        is_pekari = random.random() < 0.007
         if is_pekari:
             user_info["pekari_stock"] = 3
             pekari_msg = "💡 **GOGO! CHANCE** 💡\n✨ **ペカッた！次回から3回連続で3つ揃い確定！**\n"
 
         reels = random.choices(SLOT_SYMBOLS, k=3)
         if reels[0] == reels[1] == reels[2]:
-            payout = int(bet * 15)
+            payout = int(bet * 7)
             user_info["points"] += (payout - bet)
             msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い！** **+{payout} pt**"
         elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
