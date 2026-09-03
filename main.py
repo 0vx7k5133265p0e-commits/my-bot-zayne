@@ -295,7 +295,6 @@ async def slot(interaction: discord.Interaction, bet: int):
         f"🎰 **スロット**（賭け金: **{bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
         view=view
     )
-    
     @client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
 async def manual_save(interaction: discord.Interaction):
     # 管理者チェック
