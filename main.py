@@ -295,18 +295,7 @@ async def slot(interaction: discord.Interaction, bet: int):
         f"🎰 **スロット**（賭け金: **{bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
         view=view
     )
-@client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
-async def manual_save(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=True)
-        return
-
-    try:
-        save_data(data)
-        await interaction.response.send_message("✅ データを手動で保存しました！", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
-        
+    
 # ==========================================
 # 2. ブラックジャック機能
 # ==========================================
@@ -663,7 +652,17 @@ async def clear(interaction: discord.Interaction, amount: int):
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(f"🧹 **{len(deleted)}件** のメッセージを削除しました！", ephemeral=True)
+@client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
+async def manual_save(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=True)
+        return
 
+    try:
+        save_data(data)
+        await interaction.response.send_message("✅ データを手動で保存しました！", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
 # ==========================================
 # 6. ロール付与・認証パネル機能
 # ==========================================
