@@ -652,6 +652,28 @@ async def clear(interaction: discord.Interaction, amount: int):
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(f"🧹 **{len(deleted)}件** のメッセージを削除しました！", ephemeral=True)
 
+import discord
+from discord import app_commands
+
+# （※あなたのいままでのインポートや初期設定、変数はそのまま上に書いてある前提です）
+
+
+@client.event
+async def on_ready():
+    print(f"ログインしました: {client.user}")
+    
+    # ── 起動したときにDiscordへコマンドを同期する処理 ──
+    try:
+        synced = await client.tree.sync()
+        print(f"{len(synced)}個のコマンドを同期しました！")
+    except Exception as e:
+        print(f"同期エラー: {e}")
+
+
+# ── （中略：ここに「おみくじ」などの他のコマンドや処理が入っています） ──
+
+
+# ── 一番下の独立した何もない場所に配置するdatasaveコマンド ──
 @client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
 async def manual_save(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
@@ -660,7 +682,7 @@ async def manual_save(interaction: discord.Interaction):
 
     try:
         save_data(data)
-        await interaction.response.send_message("✅ データを手動で保存しました！", ephemeral=True)
+        await interaction.response.send_message("💾 データを手動で保存しました！", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
 # ==========================================
