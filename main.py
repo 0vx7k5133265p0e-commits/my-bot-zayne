@@ -745,7 +745,74 @@ async def setup_roles(
     view = MultiRoleView(roles)
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message(f"✅ {len(roles)}個のロールを設定したパネルを設置しました！", ephemeral=True)
+from discord.ext import tasks
 
+# ==========================================
+# 🏆 1分ごとのリアルタイム・スコアボード機能
+# ==========================================
+
+# ※ "YOUR_CHANNEL_ID_HERE" を、スコアボードを出したいチャンネルのID（数字）に書き換えてください！
+LEADERBOARD_CHANNEL_ID = YOUR_CHANNEL_ID_HERE 
+
+@tasks.loop(minutes=1)
+async def update_leaderboard():
+    channel = bot.get_channel(LEADERBOARD_CHANNEL_ID)
+    if not channel:
+        return
+    
+    # データの読み込み（ご自身の環境の読み込み関数名に合わせてください。例: load_data()など）
+    try:
+        data = load_data() 
+    except Exception:
+        return
+
+    if not data:
+        return
+
+    # ポイントの多さ順にユーザーを並べ替える（高い順）
+    sorted_users = sorted(data.items(), key=lambda x: x[1].get("points", 0), reverse=True)
+
+    # 上位10人のランキングテキストを作成
+    desc = ""
+    for i, (uid, info) in enumerate(sorted_users[:10], 1):
+        points = info.get("points", 0)
+        # 1〜3位には絵文字をつけると豪華になります
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}位:"
+        desc += f"{medal} <@{uid}> - **{points:,}** pt\n"
+
+    if not desc:
+        desc = "まだ誰もポイントを持っていません。"
+
+    # 豪華な埋め込み（Embed）の作成
+    embed = discord.Embed(
+        title="🏆 リアルタイム・スコアボード",
+        description=desc,
+        color=0xffd700
+    )
+    
+    # ▼【画像を追加したい場合】ここに画像のURL（リンク）を入れてください
+    # 右上に小さく表示させたい場合（サムネイル）:
+    # embed.set_thumbnail(url="https://example.com/your-image.png")
+    
+    # 下部に大きく表示させたい場合（画像）:
+    # embed.set_image(url="https://example.com/your-image.png")
+
+    embed.set_footer(text="1分ごとに自動更新されます ⚡")
+
+    # 過去に送ったスコアボードメッセージを書き換える（スパムにならないようにするため）
+    async for message in channel.history(limit=10):
+        if message.author == bot.user and message.embeds:
+            if message.embeds[0].title == "🏆 リアルタイム・スコアボード":
+                await message.edit(embed=embed)
+                return
+
+    # メッセージがまだない場合は新しく投稿する
+    await channel.send(embed=embed)
+
+@update_leaderboard.before_loop
+async def before_update_leaderboard():
+    await bot.wait_until_ready()
+    
 # ==========================================
 # 起動処理 & Webサーバー（Renderスリープ対策用）
 # ==========================================
