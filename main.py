@@ -652,6 +652,7 @@ async def clear(interaction: discord.Interaction, amount: int):
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(f"🧹 **{len(deleted)}件** のメッセージを削除しました！", ephemeral=True)
+
 @client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
 async def manual_save(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
