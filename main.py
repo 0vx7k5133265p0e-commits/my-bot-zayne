@@ -295,7 +295,22 @@ async def slot(interaction: discord.Interaction, bet: int):
         f"🎰 **スロット**（賭け金: **{bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
         view=view
     )
+    
+# --- 管理者用：手動でデータを保存するコマンド ---
+@bot.command(name="datasave")
+async def manual_save(ctx):
+    # 管理者だけが実行できるようにするチェック
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("このコマンドは管理者のみ実行できます。", delete_after=5)
+        return
 
+    try:
+        # ご自身の環境のセーブ関数名に合わせて書き換えてください（例: save_data()など）
+        save_data() 
+        await ctx.send("✅ データを手動で保存しました！")
+    except Exception as e:
+        await ctx.send(f"❌ 保存に失敗しました: {e}")
+        
 # ==========================================
 # 2. ブラックジャック機能
 # ==========================================
@@ -535,16 +550,16 @@ async def janken(interaction: discord.Interaction, bet: int):
 # ==========================================
 GACHA_COST = 5000
 GACHA_ITEMS = [
-    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 3),
-    ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 5),
-    ("🌟 SR: 黄金の塊（大ヒット）", 30000, 15),
-    ("💎 R: 宝石の袋（中ヒット）", 15000, 20),
+    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 0.1),
+    ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 2),
+    ("🌟 SR: 黄金の塊（大ヒット）", 30000, 4),
+    ("💎 R: 宝石の袋（中ヒット）", 15000, 5),
     ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
     ("☘️ N: トントン（元取り）", 5000, 20),
     ("💸 N: ポケットの穴（ちょっと減少）", 3000, 40),
     ("🍂 N: スリ被害（半分没収）", 1000, 30),
     ("💀 N: 一文無し体験（スカ）", 0, 20),
-    ("💣 E: 大爆発（大損・完全無）", -5000, 14)
+    ("💣 E: 大爆発（大損・完全無）", -10000, 14)
 ]
 
 def draw_gacha():
