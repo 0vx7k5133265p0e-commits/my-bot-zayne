@@ -752,7 +752,7 @@ from discord.ext import tasks
 # ==========================================
 
 # ※ "YOUR_CHANNEL_ID_HERE" を、スコアボードを出したいチャンネルのID（数字）に書き換えてください！
-LEADERBOARD_CHANNEL_ID = YOUR_CHANNEL_ID_HERE 
+LEADERBOARD_CHANNEL_ID = 1544995288459116584 
 
 @tasks.loop(minutes=1)
 async def update_leaderboard():
