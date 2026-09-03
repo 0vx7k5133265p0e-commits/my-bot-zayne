@@ -648,7 +648,6 @@ async def clear(interaction: discord.Interaction, amount: int):
     if amount < 1 or amount > 100:
         await interaction.response.send_message("⚠️ 1〜100で指定してください。", ephemeral=True)
         return
-
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(f"🧹 **{len(deleted)}件** のメッセージを削除しました！", ephemeral=True)
