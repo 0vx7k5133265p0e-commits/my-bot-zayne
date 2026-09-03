@@ -841,25 +841,28 @@ async def update_leaderboard():
     # メッセージがまだない場合は新しく投稿する
     await channel.send(embed=embed)
 
-@update_leaderboard.before_loop
-async def before_update_leaderboard():
-    await bot.wait_until_ready()
-    import discord
-from discord.ui import Button, View
-    
-# ==========================================
-# 起動処理 & Webサーバー（Renderスリープ対策用）
-# ==========================================
-import os
-import threading
+@client.event
+async def on_ready():
+    print(f"ログインしました: {client.user}")
+    try:
+        synced = await client.tree.sync()
+        print(f"{len(synced)}個のコマンドを同期しました！")
+    except Exception as e:
+        print(f"同期エラー: {e}")
 
-# Webサーバーを別スレッドで起動（スリープ対策）
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+@client.tree.command(name="datasave", description="現在のデータを手動で保存します（管理者限定）")
+async def manual_save(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=True)
+        return
 
-if __name__ == '__main__':
-    # 別スレッドでFlaskを動かしつつ
+    try:
+        save_data(data)
+        await interaction.response.send_message("💾 データを手動で保存しました！", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
+
+# ── ボット起動・サーバー処理 ──
+if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
-    
-    # そのままDiscordボットを起動する
     client.run(os.getenv("DISCORD_TOKEN"))
