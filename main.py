@@ -5,6 +5,7 @@ app = Flask(__name__)
 @app.route('/')
 def home():
     return "Bot is running!"
+
 import json
 import random
 import os
@@ -270,7 +271,7 @@ class SlotView(discord.ui.View):
 @app_commands.describe(bet="賭けるポイント数")
 async def slot(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
-        await interaction.response.send_message("⚠️ カジノゲームは giochi や `/casino` で作った専用部屋の中でのみ遊べます！", ephemeral=True)
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -417,7 +418,7 @@ class BlackjackView(discord.ui.View):
 @app_commands.describe(bet="賭けるポイント数")
 async def bj(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
-        await interaction.response.send_message("⚠️ カジノゲームは `/casino` で作った専用部屋の中でのみ遊べます！", ephemeral=True)
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -509,7 +510,7 @@ class JankenView(discord.ui.View):
 @app_commands.describe(bet="賭けるポイント数")
 async def janken(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
-        await interaction.response.send_message("⚠️ カジノゲームは `/casino` で作った専用部屋の中でのみ遊べます！", ephemeral=True)
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -544,7 +545,7 @@ GACHA_ITEMS = [
     ("💸 N: ポケットの穴（ちょっと減少）", 3000, 30),
     ("🍂 N: スリ被害（半分没収）", 1000, 20),
     ("💀 N: 一文無し体験（スカ）", 0, 10),
-    ("💣 E: 大爆発（大損・完全無）", -10000, 4）
+    ("💣 E: 大爆発（大損・完全無）", -10000, 4)
 ]
 
 def draw_gacha():
@@ -589,7 +590,7 @@ class GachaView(discord.ui.View):
 @client.tree.command(name="gacha", description="5000ptで一発逆転ガチャを回します（専用カジノ部屋限定）")
 async def gacha(interaction: discord.Interaction):
     if not is_casino_room(interaction.channel):
-        await interaction.response.send_message("⚠️ カジノゲームは `/casino` で作った専用部屋の中でのみ遊べます！", ephemeral=True)
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -759,7 +760,6 @@ class TicketSetupView(discord.ui.View):
         guild = interaction.guild
         user = interaction.user
 
-        # 既存のチケットチャンネルがあるか確認（重複防止）
         ticket_name = f"チケット-{user.name.lower()}"
         existing_channel = discord.utils.get(guild.channels, name=ticket_name)
         if existing_channel:
@@ -768,7 +768,6 @@ class TicketSetupView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        # 権限設定：サーバー管理者と本人だけが見られるようにする
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
