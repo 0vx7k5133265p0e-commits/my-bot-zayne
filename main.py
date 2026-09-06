@@ -811,10 +811,10 @@ class DiveView(discord.ui.View):
         return True
 
     def get_multiplier(self, depth):
-        if depth >= 5000: return 30.0
-        elif depth >= 3000: return 10.0
-        elif depth >= 2000: return 5.0
-        elif depth >= 1000: return 2.5
+        if depth >= 5000: return 25.0
+        elif depth >= 3000: return 5.0
+        elif depth >= 2000: return 2.5
+        elif depth >= 1000: return 1.8
         elif depth >= 500: return 1.5
         elif depth >= 100: return 1.1
         return 1.0
