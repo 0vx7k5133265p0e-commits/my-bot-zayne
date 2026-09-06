@@ -23,7 +23,6 @@ class FullBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # 不要なビュー登録を削除しエラーを解消
         self.tree.on_error = self.on_app_command_error
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -52,7 +51,6 @@ def save_data(data):
         print(f"⚠️ 保存エラー: {e}")
 
 def get_user_data(uid, data: dict) -> dict:
-    # 念のためuidを必ず文字列に変換する
     uid_str = str(uid)
     
     if uid_str not in data or not isinstance(data[uid_str], dict):
@@ -95,7 +93,6 @@ async def casino(interaction: discord.Interaction):
         await interaction.followup.send(f"⚠️ すでにあなた専用のカジノ部屋があります！ 👉 {existing_channel.mention}", ephemeral=True)
         return
 
-    # 権限設定: @everyone非表示 / 本人とBotのみ許可
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -198,11 +195,13 @@ def process_slot_spin(uid: str, bet: int, data: dict):
         user_info["pekari_stock"] -= 1
         sym = random.choice(SLOT_SYMBOLS)
         reels = [sym, sym, sym]
-        payout = int(bet * 15)
+        
+        multiplier = 25 if sym == "7️⃣" else 10
+        payout = int(bet * multiplier)
         user_info["points"] += (payout - bet)
         rem = user_info["pekari_stock"]
         pekari_msg = f"🔥 **ペカり確変中！** 3つ揃い確定！（残り確変: **{rem}回**）\n"
-        msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い！** **+{payout} pt**"
+        msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
     else:
         is_pekari = random.random() < 0.007
         if is_pekari:
@@ -211,13 +210,14 @@ def process_slot_spin(uid: str, bet: int, data: dict):
 
         reels = random.choices(SLOT_SYMBOLS, k=3)
         if reels[0] == reels[1] == reels[2]:
-            payout = int(bet * 7)
+            multiplier = 25 if reels[0] == "7️⃣" else 10
+            payout = int(bet * multiplier)
             user_info["points"] += (payout - bet)
-            msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い！** **+{payout} pt**"
+            msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
         elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
             payout = int(bet * 2)
             user_info["points"] += (payout - bet)
-            msg = f"{pekari_msg}✨ **プチ当たり！2つ揃い！** **+{payout} pt**"
+            msg = f"{pekari_msg}✨ **プチ当たり！2つ揃い（2倍）！** **+{payout} pt**"
         else:
             user_info["points"] -= bet
             msg = f"{pekari_msg}😭 **ハズレ...** **-{bet} pt**"
@@ -270,7 +270,7 @@ class SlotView(discord.ui.View):
 @app_commands.describe(bet="賭けるポイント数")
 async def slot(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
-        await interaction.response.send_message("⚠️ カジノゲームは `/casino` で作った専用部屋の中でのみ遊べます！", ephemeral=True)
+        await interaction.response.send_message("⚠️ カジノゲームは giochi や `/casino` で作った専用部屋の中でのみ遊べます！", ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -535,16 +535,16 @@ async def janken(interaction: discord.Interaction, bet: int):
 # ==========================================
 GACHA_COST = 5000
 GACHA_ITEMS = [
-    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 0.1),
-    ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 2),
-    ("🌟 SR: 黄金の塊（大ヒット）", 30000, 4),
-    ("💎 R: 宝石の袋（中ヒット）", 15000, 5),
+    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
+    ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 4),
+    ("🌟 SR: 黄金の塊（大ヒット）", 30000, 9),
+    ("💎 R: 宝石の袋（中ヒット）", 15000, 14),
     ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
     ("☘️ N: トントン（元取り）", 5000, 20),
-    ("💸 N: ポケットの穴（ちょっと減少）", 3000, 40),
-    ("🍂 N: スリ被害（半分没収）", 1000, 30),
-    ("💀 N: 一文無し体験（スカ）", 0, 20),
-    ("💣 E: 大爆発（大損・完全無）", -10000, 14)
+    ("💸 N: ポケットの穴（ちょっと減少）", 3000, 30),
+    ("🍂 N: スリ被害（半分没収）", 1000, 20),
+    ("💀 N: 一文無し体験（スカ）", 0, 10),
+    ("💣 E: 大爆発（大損・完全無）", -10000, 4）
 ]
 
 def draw_gacha():
@@ -733,22 +733,93 @@ async def setup_roles(
     view = MultiRoleView(roles)
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message(f"✅ {len(roles)}個のロールを設定したパネルを設置しました！", ephemeral=True)
+
+# ==========================================
+# 🎫 7. お問い合わせチケット機能
+# ==========================================
+class CloseTicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔒 チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="close_ticket_button")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🔒 チケットを閉じます。5秒後にこのチャンネルを削除します...")
+        await asyncio.sleep(5)
+        try:
+            await interaction.channel.delete()
+        except Exception:
+            pass
+
+class TicketSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🎫 お問い合わせを作成", style=discord.ButtonStyle.primary, custom_id="create_ticket_button")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        user = interaction.user
+
+        # 既存のチケットチャンネルがあるか確認（重複防止）
+        ticket_name = f"チケット-{user.name.lower()}"
+        existing_channel = discord.utils.get(guild.channels, name=ticket_name)
+        if existing_channel:
+            await interaction.response.send_message(f"⚠️ すでにあなた専用の問い合わせチャンネルがあります！ 👉 {existing_channel.mention}", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # 権限設定：サーバー管理者と本人だけが見られるようにする
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+
+        try:
+            category = interaction.channel.category
+            channel = await guild.create_text_channel(
+                name=ticket_name,
+                overwrites=overwrites,
+                category=category,
+                topic=f"{user.display_name} の問い合わせチケット"
+            )
+
+            view = CloseTicketView()
+            await channel.send(
+                f"🎫 **{user.mention} 様、お問い合わせありがとうございます！**\n"
+                f"スタッフが確認するまで少々お待ちください。用事が済んだら下のボタンでチケットを閉じることができます。",
+                view=view
+            )
+            await interaction.followup.send(f"✅ お問い合わせチャンネルを作成しました！ 👉 {channel.mention}", ephemeral=True)
+
+        except discord.Forbidden:
+            await interaction.followup.send("⚠️ Botに「チャンネルの管理」権限がないため、チケットを作成できませんでした。", ephemeral=True)
+
+@client.tree.command(name="setup_ticket", description="問い合わせ用のパネルを設置します（管理者限定）")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_ticket(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🎫 お問い合わせ / サポート",
+        description="ご質問やご用件がある場合は、下のボタンを押して専用の問い合わせチャンネルを作成してください。",
+        color=0x3498db
+    )
+    view = TicketSetupView()
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("✅ 問い合わせパネルを設置しました！", ephemeral=True)
+
 from discord.ext import tasks
 
 # ==========================================
 # 🏆 1分ごとのリアルタイム・スコアボード機能
 # ==========================================
-
-# ※ "YOUR_CHANNEL_ID_HERE" を、スコアボードを出したいチャンネルのID（数字）に書き換えてください！
-LEADERBOARD_CHANNEL_ID = 1544995288459116584 
+LEADERBOARD_CHANNEL_ID = 1544995288459116584  
 
 @tasks.loop(minutes=1)
 async def update_leaderboard():
-    channel = bot.get_channel(LEADERBOARD_CHANNEL_ID)
+    channel = client.get_channel(LEADERBOARD_CHANNEL_ID)
     if not channel:
         return
     
-    # データの読み込み（ご自身の環境の読み込み関数名に合わせてください。例: load_data()など）
     try:
         data = load_data() 
     except Exception:
@@ -757,49 +828,38 @@ async def update_leaderboard():
     if not data:
         return
 
-    # ポイントの多さ順にユーザーを並べ替える（高い順）
     sorted_users = sorted(data.items(), key=lambda x: x[1].get("points", 0), reverse=True)
 
-    # 上位10人のランキングテキストを作成
     desc = ""
     for i, (uid, info) in enumerate(sorted_users[:10], 1):
         points = info.get("points", 0)
-        # 1〜3位には絵文字をつけると豪華になります
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}位:"
         desc += f"{medal} <@{uid}> - **{points:,}** pt\n"
 
     if not desc:
         desc = "まだ誰もポイントを持っていません。"
 
-    # 豪華な埋め込み（Embed）の作成
     embed = discord.Embed(
         title="🏆 リアルタイム・スコアボード",
         description=desc,
         color=0xffd700
     )
-    
-    # ▼【画像を追加したい場合】ここに画像のURL（リンク）を入れてください
-    # 右上に小さく表示させたい場合（サムネイル）:
-    # embed.set_thumbnail(url="https://example.com/your-image.png")
-    
-    # 下部に大きく表示させたい場合（画像）:
-    # embed.set_image(url="https://example.com/your-image.png")
-
     embed.set_footer(text="1分ごとに自動更新されます ⚡")
 
-    # 過去に送ったスコアボードメッセージを書き換える（スパムにならないようにするため）
     async for message in channel.history(limit=10):
-        if message.author == bot.user and message.embeds:
+        if message.author == client.user and message.embeds:
             if message.embeds[0].title == "🏆 リアルタイム・スコアボード":
                 await message.edit(embed=embed)
                 return
 
-    # メッセージがまだない場合は新しく投稿する
     await channel.send(embed=embed)
 
 @client.event
 async def on_ready():
     print(f"ログインしました: {client.user}")
+    if not update_leaderboard.is_running():
+        update_leaderboard.start()
+        
     try:
         synced = await client.tree.sync()
         print(f"{len(synced)}個のコマンドを同期しました！")
@@ -813,6 +873,7 @@ async def manual_save(interaction: discord.Interaction):
         return
 
     try:
+        data = load_data()
         save_data(data)
         await interaction.response.send_message("💾 データを手動で保存しました！", ephemeral=True)
     except Exception as e:
