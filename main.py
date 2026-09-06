@@ -17,6 +17,7 @@ from discord import app_commands
 # --- 設定 ---
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True  # ユーザー名取得に必要
 
 class FullBot(discord.Client):
     def __init__(self):
@@ -109,9 +110,9 @@ def is_casino_room(channel: discord.TextChannel) -> bool:
     return channel.name.startswith("🎰-")
 
 # ==========================================
-# 📊 1分ごと自動更新ランキング機能
+# 📊 1分ごと自動更新ランキング機能（名前表示対応）
 # ==========================================
-def create_ranking_embed(guild: discord.Guild, data: dict) -> discord.Embed:
+async def create_ranking_embed(guild: discord.Guild, data: dict, bot) -> discord.Embed:
     sorted_users = sorted(
         data.items(),
         key=lambda item: item[1].get("points", 0) if isinstance(item[1], dict) else 0,
@@ -127,8 +128,18 @@ def create_ranking_embed(guild: discord.Guild, data: dict) -> discord.Embed:
         for i, (uid_str, info) in enumerate(sorted_users):
             rank_icon = medals[i] if i < 3 else f"`#{i+1}`"
             pts = info.get("points", 0) if isinstance(info, dict) else 0
-            member = guild.get_member(int(uid_str))
-            name = member.display_name if member else f"ユーザーID: {uid_str}"
+            
+            name = f"ユーザーID: {uid_str}"
+            try:
+                member = guild.get_member(int(uid_str))
+                if member:
+                    name = member.display_name
+                else:
+                    user = await bot.fetch_user(int(uid_str))
+                    name = user.name
+            except Exception:
+                pass
+
             desc += f"{rank_icon} **{name}** : **{pts:,} pt**\n"
 
     embed = discord.Embed(
@@ -153,7 +164,7 @@ async def update_all_ranking_boards(bot):
         if not channel:
             continue
         message_id = info.get("message_id")
-        embed = create_ranking_embed(guild, data)
+        embed = await create_ranking_embed(guild, data, bot)
         try:
             if message_id:
                 msg = await channel.fetch_message(message_id)
@@ -163,7 +174,6 @@ async def update_all_ranking_boards(bot):
                 info["message_id"] = msg.id
                 save_settings(settings)
         except discord.NotFound:
-            # メッセージが消されていたら新規送信
             msg = await channel.send(embed=embed)
             info["message_id"] = msg.id
             save_settings(settings)
@@ -178,7 +188,7 @@ async def setup_ranking(interaction: discord.Interaction):
     channel = interaction.channel
 
     data = load_data()
-    embed = create_ranking_embed(guild, data)
+    embed = await create_ranking_embed(guild, data, client)
     msg = await channel.send(embed=embed)
 
     settings = load_settings()
@@ -306,6 +316,17 @@ class ChangeBetModal(discord.ui.Modal):
             view = JankenView(self.user_id, new_bet)
             await interaction.message.edit(
                 content=f"✊✌️✋ **じゃんけん開始**（賭け金: **{new_bet} pt**）\n手を選んでください！",
+                view=view
+            )
+        elif self.game_type == "dive":
+            view = DiveView(self.user_id, new_bet, depth=0, oxygen=100)
+            await interaction.message.edit(
+                content=(
+                    f"🌊 **深海ダイブ開始！**（賭け金: **{new_bet} pt**）\n"
+                    f"・現在の深度: **0 m**（倍率: **×1.0**）\n"
+                    f"・残り酸素: **100**\n\n"
+                    f"ボタンを押して潜水を始めてください👇"
+                ),
                 view=view
             )
 
@@ -655,7 +676,7 @@ async def janken(interaction: discord.Interaction, bet: int):
 # ==========================================
 GACHA_COST = 5000
 GACHA_ITEMS = [
-    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
+    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 2),
     ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 5),
     ("🌟 SR: 黄金の塊（大ヒット）", 30000, 9),
     ("💎 R: 宝石の袋（中ヒット）", 15000, 18),
@@ -664,7 +685,7 @@ GACHA_ITEMS = [
     ("💸 N: ポケットの穴（ちょっと減少）", 3000, 30),
     ("🍂 N: スリ被害（半分没収）", 1000, 20),
     ("💀 N: 一文無し体験（スカ）", 0, 10),
-    ("💣 E: 大爆発（大損・完全無）", -10000, 4)
+    ("💣 E: 大爆発（大損・完全無）", -10000, 5)
 ]
 
 def draw_gacha():
@@ -734,8 +755,47 @@ async def gacha(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, view=view)
 
 # ==========================================
-# 5. 深海ダイブ機能
+# 5. 深海ダイブ機能（もう一度遊ぶ・賭け金変更対応）
 # ==========================================
+class DivePlayAgainView(discord.ui.View):
+    def __init__(self, user_id, bet):
+        super().__init__(timeout=None)
+        self.user_id = str(user_id)
+        self.bet = bet
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("⚠️ あなたのゲームではありません！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="🔄 同じ賭け金で潜る", style=discord.ButtonStyle.primary)
+    async def play_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        data = load_data()
+        user_info = get_user_data(self.user_id, data)
+
+        if user_info["points"] < self.bet:
+            user_info["points"] = INITIAL_POINTS
+            save_data(data)
+            await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度押してください。", ephemeral=True)
+            return
+
+        view = DiveView(self.user_id, self.bet, depth=0, oxygen=100)
+        await interaction.message.edit(
+            content=(
+                f"🌊 **深海ダイブ開始！**（賭け金: **{self.bet} pt**）\n"
+                f"・現在の深度: **0 m**（倍率: **×1.0**）\n"
+                f"・残り酸素: **100**\n\n"
+                f"ボタンを押して潜水を始めてください👇"
+            ),
+            view=view
+        )
+
+    @discord.ui.button(label="💰 賭け金を変更", style=discord.ButtonStyle.secondary)
+    async def change_bet(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ChangeBetModal("dive", self.user_id))
+
 class DiveView(discord.ui.View):
     def __init__(self, user_id, bet, depth=0, oxygen=100):
         super().__init__(timeout=None)
@@ -769,6 +829,8 @@ class DiveView(discord.ui.View):
         oxy_loss = random.randint(15, 35) + int(self.depth / 500) * 3
         self.oxygen -= oxy_loss
 
+        again_view = DivePlayAgainView(self.user_id, self.bet)
+
         if self.oxygen <= 0:
             data = load_data()
             user_info = get_user_data(self.user_id, data)
@@ -777,7 +839,7 @@ class DiveView(discord.ui.View):
             self.stop()
             await interaction.message.edit(
                 content=f"💀 **酸素が尽きて意識を失いました...（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
-                view=None
+                view=again_view
             )
             return
 
@@ -786,26 +848,25 @@ class DiveView(discord.ui.View):
 
         if roll < hazard_chance:
             event_type = random.choice(["fault", "monster", "crack"])
+            data = load_data()
+            user_info = get_user_data(self.user_id, data)
+            
             if event_type == "fault":
-                data = load_data()
-                user_info = get_user_data(self.user_id, data)
                 user_info["points"] -= self.bet
                 save_data(data)
                 self.stop()
                 await interaction.message.edit(
                     content=f"⚠️ **潜水艇が故障しました！全額ロスト（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
-                    view=None
+                    view=again_view
                 )
                 return
             elif event_type == "monster":
-                data = load_data()
-                user_info = get_user_data(self.user_id, data)
                 user_info["points"] -= self.bet
                 save_data(data)
                 self.stop()
                 await interaction.message.edit(
                     content=f"🦑 **深海怪獣に襲われました！強制浮上＆積荷全没収（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
-                    view=None
+                    view=again_view
                 )
                 return
             else:
@@ -813,25 +874,21 @@ class DiveView(discord.ui.View):
                     mult = self.get_multiplier(self.depth) * 2
                     payout = int(self.bet * mult)
                     profit = payout - self.bet
-                    data = load_data()
-                    user_info = get_user_data(self.user_id, data)
                     user_info["points"] += profit
                     save_data(data)
                     self.stop()
                     await interaction.message.edit(
                         content=f"🌀 **深海の裂け目で古代文明の宝を発見！大当たり！（深度: {self.depth}m）**\n🎉 **+{payout} pt 獲得！**（所持: **{user_info['points']} pt**）",
-                        view=None
+                        view=again_view
                     )
                     return
                 else:
-                    data = load_data()
-                    user_info = get_user_data(self.user_id, data)
                     user_info["points"] -= self.bet
                     save_data(data)
                     self.stop()
                     await interaction.message.edit(
                         content=f"💥 **深海の裂け目で圧壊しました...（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
-                        view=None
+                        view=again_view
                     )
                     return
 
@@ -864,6 +921,7 @@ class DiveView(discord.ui.View):
         save_data(data)
         self.stop()
 
+        again_view = DivePlayAgainView(self.user_id, self.bet)
         await interaction.message.edit(
             content=(
                 f"🎉 **無事に浮上成功！**\n"
@@ -871,7 +929,7 @@ class DiveView(discord.ui.View):
                 f"・獲得ポイント: **+{payout} pt**（純増: **+{profit} pt**）\n"
                 f"・現在の所持: **{user_info['points']} pt**"
             ),
-            view=None
+            view=again_view
         )
 
 @client.tree.command(name="dive", description="深海ダイブギャンブルを開始します（専用カジノ部屋限定）")
