@@ -32,23 +32,33 @@ class FullBot(discord.Client):
 
 client = FullBot()
 DATA_FILE = "data.json"
-SETTING_FILE = "settings.json"  # スコアボード設置場所の保存用ファイル
+SETTING_FILE = "settings.json"
 INITIAL_POINTS = 300  # 救済ポイント
 
-# --- データ管理 ---
+# --- 安全なデータ管理 ---
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+            content = f.read()
+            if not content.strip():
+                return {}
+            return json.loads(content)
+    except Exception as e:
+        print(f"⚠️ データ読込エラー: {e}")
         return {}
 
 def save_data(data):
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
+        # 一時ファイルに書いてから置き換えることで、書き込み中のクラッシュによるデータ消失を防ぐ
+        temp_file = DATA_FILE + ".tmp"
+        with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
+        if os.path.exists(DATA_FILE):
+            os.replace(temp_file, DATA_FILE)
+        else:
+            os.rename(temp_file, DATA_FILE)
     except Exception as e:
         print(f"⚠️ 保存エラー: {e}")
 
@@ -58,8 +68,12 @@ def load_settings():
         return {}
     try:
         with open(SETTING_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+            content = f.read()
+            if not content.strip():
+                return {}
+            return json.loads(content)
+    except Exception as e:
+        print(f"⚠️ 設定読込エラー: {e}")
         return {}
 
 def save_settings(settings):
@@ -559,7 +573,7 @@ GACHA_ITEMS = [
     ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
     ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 4),
     ("🌟 SR: 黄金の塊（大ヒット）", 30000, 9),
-    ("💎 R: 宝石の袋（中ヒット）", 15000, 14),
+    ("💎 R: 宝石の袋（中ヒット）", 15000, 18),
     ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
     ("☘️ N: トントン（元取り）", 5000, 20),
     ("💸 N: ポケットの穴（ちょっと減少）", 3000, 30),
@@ -636,7 +650,7 @@ async def gacha(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, view=view)
 
 # ==========================================
-# 5. おみくじ・ランキング・クリア機能
+# 5. おみくじ・ランキング機能
 # ==========================================
 @client.tree.command(name="omikuji", description="今日の運勢を占います")
 async def omikuji(interaction: discord.Interaction):
@@ -846,7 +860,6 @@ async def setup_leaderboard(interaction: discord.Interaction):
     
     await interaction.response.send_message(f"✅ このチャンネル ({interaction.channel.mention}) をスコアボードの設置場所に設定しました！1分以内にランキングが表示されます。", ephemeral=True)
     
-    # 即時初回更新を実行
     await update_leaderboard_task_logic()
 
 async def update_leaderboard_task_logic():
@@ -891,7 +904,6 @@ async def update_leaderboard_task_logic():
                 if message.embeds[0].title == "🏆 リアルタイム・スコアボード":
                     await message.edit(embed=embed)
                     return
-        # 既存がなければ新しく投稿
         await channel.send(embed=embed)
     except Exception as e:
         print(f"スコアボード更新エラー: {e}")
@@ -920,8 +932,8 @@ async def manual_save(interaction: discord.Interaction):
 
     try:
         data = load_data()
-        save_data(data)
-        await interaction.response.send_message("💾 データを手動で保存しました！", ephemeral=True)
+        save_data(data)  # 現在のメモリ上の安全な状態をファイルに強制同期
+        await interaction.response.send_message(f"💾 データを手動で保存しました！（現在の登録ユーザー数: {len(data)}人）", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
 
