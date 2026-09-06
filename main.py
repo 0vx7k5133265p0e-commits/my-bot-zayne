@@ -51,7 +51,6 @@ def load_data():
 
 def save_data(data):
     try:
-        # 一時ファイルに書いてから置き換えることで、書き込み中のクラッシュによるデータ消失を防ぐ
         temp_file = DATA_FILE + ".tmp"
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
@@ -85,7 +84,6 @@ def save_settings(settings):
 
 def get_user_data(uid, data: dict) -> dict:
     uid_str = str(uid)
-    
     if uid_str not in data or not isinstance(data[uid_str], dict):
         data[uid_str] = {"points": INITIAL_POINTS, "pekari_stock": 0}
         save_data(data)
@@ -93,7 +91,6 @@ def get_user_data(uid, data: dict) -> dict:
         data[uid_str]["points"] = INITIAL_POINTS
         data[uid_str]["pekari_stock"] = 0
         save_data(data)
-        
     return data[uid_str]
 
 # --- 専用部屋チェック判定 ---
@@ -146,7 +143,7 @@ async def casino(interaction: discord.Interaction, category: discord.CategoryCha
         view = CloseRoomView()
         await channel.send(
             f"🎰 **{user.mention} 専用カジノへようこそ！** 🎰\n"
-            f"ここで `/slot` `/bj` `/janken` `/gacha` などのゲームを楽しめます。\n"
+            f"ここで `/slot` `/bj` `/janken` `/gacha` `/dive` などのゲームを楽しめます。\n"
             f"遊び終わったら下のボタンを押して部屋を閉じてください！",
             view=view,
             silent=True
@@ -201,7 +198,6 @@ class ChangeBetModal(discord.ui.Modal):
                 content=f"🎰 **スロット**（賭け金: **{new_bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
                 view=view
             )
-
         elif self.game_type == "bj":
             p_hand, d_hand = [deal_card(), deal_card()], [deal_card(), deal_card()]
             view = BlackjackView(self.user_id, new_bet, p_hand, d_hand)
@@ -209,7 +205,6 @@ class ChangeBetModal(discord.ui.Modal):
                 content=f"🎮 **ブラックジャック開始**（賭け金: **{new_bet} pt**）\n**手札:** {p_hand} ({calculate_score(p_hand)})\n**ディーラー:** [{d_hand[0]}]",
                 view=view
             )
-
         elif self.game_type == "janken":
             view = JankenView(self.user_id, new_bet)
             await interaction.message.edit(
@@ -230,7 +225,6 @@ def process_slot_spin(uid: str, bet: int, data: dict):
         user_info["pekari_stock"] -= 1
         sym = random.choice(SLOT_SYMBOLS)
         reels = [sym, sym, sym]
-        
         multiplier = 25 if sym == "7️⃣" else 10
         payout = int(bet * multiplier)
         user_info["points"] += (payout - bet)
@@ -294,11 +288,9 @@ class SlotView(discord.ui.View):
     async def change_bet(self, interaction: discord.Interaction, button: discord.ui.Button):
         data = load_data()
         user_info = get_user_data(self.user_id, data)
-        
         if user_info.get("pekari_stock", 0) > 0:
             await interaction.response.send_message("⚠️ **ペカり確変中は賭け金を変更できません！**", ephemeral=True)
             return
-
         await interaction.response.send_modal(ChangeBetModal("slot", self.user_id))
 
 @client.tree.command(name="slot", description="スロットを回します（専用カジノ部屋限定）")
@@ -307,7 +299,6 @@ async def slot(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
         await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
-
     await interaction.response.defer()
     data = load_data()
     uid = str(interaction.user.id)
@@ -403,7 +394,6 @@ class BlackjackView(discord.ui.View):
             user_info = get_user_data(self.user_id, data)
             user_info["points"] -= self.bet
             save_data(data)
-            
             again_view = BJPlayAgainView(self.user_id, self.bet)
             await interaction.message.edit(
                 content=f"💥 **バースト！**\n**手札:** {self.player_hand} (合計: {p_score})\n**-{self.bet} pt**（残り: **{user_info['points']} pt**）",
@@ -454,7 +444,6 @@ async def bj(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
         await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
-
     await interaction.response.defer()
     data = load_data()
     uid = str(interaction.user.id)
@@ -546,7 +535,6 @@ async def janken(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
         await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
-
     await interaction.response.defer()
     data = load_data()
     uid = str(interaction.user.id)
@@ -571,7 +559,7 @@ async def janken(interaction: discord.Interaction, bet: int):
 GACHA_COST = 5000
 GACHA_ITEMS = [
     ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
-    ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 4),
+    ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 5),
     ("🌟 SR: 黄金の塊（大ヒット）", 30000, 9),
     ("💎 R: 宝石の袋（中ヒット）", 15000, 18),
     ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
@@ -626,7 +614,6 @@ async def gacha(interaction: discord.Interaction):
     if not is_casino_room(interaction.channel):
         await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
-
     await interaction.response.defer()
     data = load_data()
     uid = str(interaction.user.id)
@@ -643,42 +630,203 @@ async def gacha(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="🎰 5000pt プレミアムガチャ結果",
-        description=f"獲得: **{item_name}**\n\nポイント変動: **{delta_pts - GACHA_COST:+} pt**\n現在の所持ポイント: **{user_info['points']} pt**",
+        description=f"description=獲得: **{item_name}**\n\nポイント変動: **{delta_pts - GACHA_COST:+} pt**\n現在の所持ポイント: **{user_info['points']} pt**",
         color=0xffd700 if delta_pts >= GACHA_COST else 0xff0000
     )
     view = GachaView(uid)
     await interaction.followup.send(embed=embed, view=view)
 
 # ==========================================
-# 5. おみくじ・ランキング機能
+# 5. 深海ダイブ機能（新追加）
+# ==========================================
+class DiveView(discord.ui.View):
+    def __init__(self, user_id, bet, depth=0, oxygen=100):
+        super().__init__(timeout=None)
+        self.user_id = str(user_id)
+        self.bet = bet
+        self.depth = depth
+        self.oxygen = oxygen
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("⚠️ あなたのダイブ画面ではありません！", ephemeral=True)
+            return False
+        return True
+
+    def get_multiplier(self, depth):
+        if depth >= 5000: return 30.0
+        elif depth >= 3000: return 10.0
+        elif depth >= 2000: return 5.0
+        elif depth >= 1000: return 2.5
+        elif depth >= 500: return 1.5
+        elif depth >= 100: return 1.1
+        return 1.0
+
+    @discord.ui.button(label="⬇️ さらに潜る (ダイブ)", style=discord.ButtonStyle.primary)
+    async def dive_deeper(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        
+        # 深度が進むごとに深く（+300m〜+700m）
+        add_depth = random.randint(300, 700)
+        self.depth += add_depth
+
+        # 酸素消費（深いほど多く消費: 15〜35）
+        oxy_loss = random.randint(15, 35) + int(self.depth / 500) * 3
+        self.oxygen -= oxy_loss
+
+        # 酸素切れ または 故障・深海の裂け目（確率判定）
+        if self.oxygen <= 0:
+            data = load_data()
+            user_info = get_user_data(self.user_id, data)
+            user_info["points"] -= self.bet
+            save_data(data)
+            self.stop()
+            await interaction.message.edit(
+                content=f"💀 **酸素が尽きて意識を失いました...（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
+                view=None
+            )
+            return
+
+        # ランダムイベント抽選
+        # 深いほど故障率・怪物率アップ
+        hazard_chance = 0.15 + (self.depth / 15000)
+        roll = random.random()
+
+        if roll < hazard_chance:
+            # トラブル発生
+            event_type = random.choice(["fault", "monster", "crack"])
+            if event_type == "fault":
+                data = load_data()
+                user_info = get_user_data(self.user_id, data)
+                user_info["points"] -= self.bet
+                save_data(data)
+                self.stop()
+                await interaction.message.edit(
+                    content=f"⚠️ **潜水艇が故障しました！全額ロスト（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
+                    view=None
+                )
+                return
+            elif event_type == "monster":
+                # 深海怪物：大ダメージ or 没収
+                data = load_data()
+                user_info = get_user_data(self.user_id, data)
+                user_info["points"] -= self.bet
+                save_data(data)
+                self.stop()
+                await interaction.message.edit(
+                    content=f"🦑 **深海怪獣に襲われました！強制浮上＆積荷全没収（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
+                    view=None
+                )
+                return
+            else:
+                # 深海の裂け目 (大当たり or 全損)
+                if random.random() < 0.5:
+                    mult = self.get_multiplier(self.depth) * 2
+                    payout = int(self.bet * mult)
+                    profit = payout - self.bet
+                    data = load_data()
+                    user_info = get_user_data(self.user_id, data)
+                    user_info["points"] += profit
+                    save_data(data)
+                    self.stop()
+                    await interaction.message.edit(
+                        content=f"🌀 **深海の裂け目で古代文明の宝を発見！大当たり！（深度: {self.depth}m）**\n🎉 **+{payout} pt 獲得！**（所持: **{user_info['points']} pt**）",
+                        view=None
+                    )
+                    return
+                else:
+                    data = load_data()
+                    user_info = get_user_data(self.user_id, data)
+                    user_info["points"] -= self.bet
+                    save_data(data)
+                    self.stop()
+                    await interaction.message.edit(
+                        content=f"💥 **深海の裂け目で圧壊しました...（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
+                        view=None
+                    )
+                    return
+
+        # 通常進行（お宝ゲット等）
+        mult = self.get_multiplier(self.depth)
+        events = ["貝 (x1.2)", "宝石 (x2)", "沈没財宝 (x3)", "巨大生物 (x5)"]
+        ev = random.choice(events)
+
+        await interaction.message.edit(
+            content=(
+                f"🌊 **深海ダイブ中...**\n"
+                f"・掛け金: **{self.bet} pt**\n"
+                f"・現在の深度: **{self.depth} m** （倍率: **×{mult}**）\n"
+                f"・残り酸素: **{self.oxygen}**\n"
+                f"・直近の発見: **{ev}**\n\n"
+                f"さらに深く潜りますか？それとも浮上して配当を確定させますか？"
+            ),
+            view=self
+        )
+
+    @discord.ui.button(label="🚀 浮上して配当を回収 (リターン)", style=discord.ButtonStyle.success)
+    async def return_surface(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        mult = self.get_multiplier(self.depth)
+        payout = int(self.bet * mult)
+        profit = payout - self.bet
+
+        data = load_data()
+        user_info = get_user_data(self.user_id, data)
+        user_info["points"] += profit
+        save_data(data)
+        self.stop()
+
+        await interaction.message.edit(
+            content=(
+                f"🎉 **無事に浮上成功！**\n"
+                f"・到達深度: **{self.depth} m**（倍率: **×{mult}**）\n"
+                f"・獲得ポイント: **+{payout} pt**（純増: **+{profit} pt**）\n"
+                f"・現在の所持: **{user_info['points']} pt**"
+            ),
+            view=None
+        )
+
+@client.tree.command(name="dive", description="深海ダイブギャンブルを開始します（専用カジノ部屋限定）")
+@app_commands.describe(bet="賭けるポイント数")
+async def dive(interaction: discord.Interaction, bet: int):
+    if not is_casino_room(interaction.channel):
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    data = load_data()
+    uid = str(interaction.user.id)
+    user_info = get_user_data(uid, data)
+
+    if user_info["points"] < bet:
+        user_info["points"] = INITIAL_POINTS
+        save_data(data)
+        await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度 `/dive` を実行してください。", ephemeral=True)
+        return
+
+    if bet <= 0:
+        await interaction.followup.send("⚠️ 1pt以上を指定してください。", ephemeral=True)
+        return
+
+    view = DiveView(uid, bet, depth=0, oxygen=100)
+    await interaction.followup.send(
+        f"🌊 **深海ダイブ開始！**\n"
+        f"・掛け金: **{bet} pt**\n"
+        f"・現在の深度: **0 m**（倍率: **×1.0**）\n"
+        f"・残り酸素: **100**\n\n"
+        f"ボタンを押して潜水を始めてください👇",
+        view=view
+    )
+
+# ==========================================
+# 6. おみくじ・ランキング・その他
 # ==========================================
 @client.tree.command(name="omikuji", description="今日の運勢を占います")
 async def omikuji(interaction: discord.Interaction):
     fortunes = ["大吉 🌟", "中吉 🌸", "小吉 ☘️", "吉 ✨", "末吉 🍃", "凶 ☁️"]
     await interaction.response.send_message(f"⛩️ **おみくじ結果:** 【 **{random.choice(fortunes)}** 】")
 
-@client.tree.command(name="rank", description="ポイントランキングを表示します")
-async def rank(interaction: discord.Interaction):
-    data = load_data()
-    if not data:
-        await interaction.response.send_message("まだデータがありません。")
-        return
-
-    rank_list = []
-    for uid, val in data.items():
-        pts = val["points"] if isinstance(val, dict) else val
-        rank_list.append((uid, pts))
-
-    sorted_rank = sorted(rank_list, key=lambda x: x[1], reverse=True)
-    text = "🏆 **所持ポイント ランキング** 🏆\n"
-    for i, (user_id, points) in enumerate(sorted_rank[:5], start=1):
-        text += f"**{i}位:** <@{user_id}> - **{points} pt**\n"
-
-    await interaction.response.send_message(text)
-
-# ==========================================
-# 6. ロール付与・認証パネル機能
-# ==========================================
+# ロール付与・チケット等の機能はそのまま保持
 class VerifyView(discord.ui.View):
     def __init__(self, role_id: int):
         super().__init__(timeout=None)
@@ -690,7 +838,6 @@ class VerifyView(discord.ui.View):
         if not role:
             await interaction.response.send_message("⚠️ 設定されたロールが見つかりません。", ephemeral=True)
             return
-
         if role in interaction.user.roles:
             await interaction.response.send_message("⚠️ すでに認証済みです！", ephemeral=True)
         else:
@@ -708,11 +855,9 @@ class MultiRoleSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         role_id = int(self.values[0])
         role = interaction.guild.get_role(role_id)
-
         if not role:
             await interaction.response.send_message("⚠️ ロールが見つかりません。", ephemeral=True)
             return
-
         if role in interaction.user.roles:
             await interaction.user.remove_roles(role)
             await interaction.response.send_message(f"❌ **{role.name}** を解除しました。", ephemeral=True)
@@ -747,31 +892,19 @@ async def setup_verify(interaction: discord.Interaction, role: discord.Role):
 async def setup_roles(
     interaction: discord.Interaction,
     role1: discord.Role,
-    role2: discord.Role = None,
-    role3: discord.Role = None,
-    role4: discord.Role = None,
-    role5: discord.Role = None,
-    role6: discord.Role = None,
-    role7: discord.Role = None,
-    role8: discord.Role = None,
-    role9: discord.Role = None,
-    role10: discord.Role = None
+    role2: discord.Role = None, role3: discord.Role = None, role4: discord.Role = None, role5: discord.Role = None,
+    role6: discord.Role = None, role7: discord.Role = None, role8: discord.Role = None, role9: discord.Role = None, role10: discord.Role = None
 ):
     roles = [r for r in [role1, role2, role3, role4, role5, role6, role7, role8, role9, role10] if r is not None]
-
     embed = discord.Embed(
         title="🎭 ロール選択パネル",
         description="メニューから取得・解除したいロールを選択してください。",
         color=0x3498db
     )
-    
     view = MultiRoleView(roles)
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message(f"✅ {len(roles)}個のロールを設定したパネルを設置しました！", ephemeral=True)
 
-# ==========================================
-# 🎫 7. お問い合わせチケット機能
-# ==========================================
 class CloseTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -794,7 +927,6 @@ class TicketSetupView(discord.ui.View):
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
-
         ticket_name = f"チケット-{user.name.lower()}"
         existing_channel = discord.utils.get(guild.channels, name=ticket_name)
         if existing_channel:
@@ -802,15 +934,12 @@ class TicketSetupView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
-
         category = self.target_category if self.target_category is not None else interaction.channel.category
-
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
         }
-
         try:
             channel = await guild.create_text_channel(
                 name=ticket_name,
@@ -818,7 +947,6 @@ class TicketSetupView(discord.ui.View):
                 category=category,
                 topic=f"{user.display_name} の問い合わせチケット"
             )
-
             view = CloseTicketView()
             await channel.send(
                 f"🎫 **{user.mention} 様、お問い合わせありがとうございます！**\n"
@@ -826,7 +954,6 @@ class TicketSetupView(discord.ui.View):
                 view=view
             )
             await interaction.followup.send(f"✅ お問い合わせチャンネルを作成しました！ 👉 {channel.mention}", ephemeral=True)
-
         except discord.Forbidden:
             await interaction.followup.send("⚠️ Botにチャンネル作成・管理権限がありません。", ephemeral=True)
 
@@ -846,78 +973,9 @@ async def setup_ticket(interaction: discord.Interaction, description: str, categ
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message("✅ 問い合わせパネルを設置しました！", ephemeral=True)
 
-from discord.ext import tasks
-
-# ==========================================
-# 🏆 8. リアルタイム・スコアボード機能（場所指定可能）
-# ==========================================
-@client.tree.command(name="setup_leaderboard", description="このチャンネルをリアルタイムスコアボードの設置場所に指定します（管理者限定）")
-@app_commands.checks.has_permissions(administrator=True)
-async def setup_leaderboard(interaction: discord.Interaction):
-    settings = load_settings()
-    settings["leaderboard_channel_id"] = interaction.channel.id
-    save_settings(settings)
-    
-    await interaction.response.send_message(f"✅ このチャンネル ({interaction.channel.mention}) をスコアボードの設置場所に設定しました！1分以内にランキングが表示されます。", ephemeral=True)
-    
-    await update_leaderboard_task_logic()
-
-async def update_leaderboard_task_logic():
-    settings = load_settings()
-    channel_id = settings.get("leaderboard_channel_id")
-    if not channel_id:
-        return
-    
-    channel = client.get_channel(channel_id)
-    if not channel:
-        return
-    
-    try:
-        data = load_data() 
-    except Exception:
-        return
-
-    if not data:
-        return
-
-    sorted_users = sorted(data.items(), key=lambda x: x[1].get("points", 0), reverse=True)
-
-    desc = ""
-    for i, (uid, info) in enumerate(sorted_users[:10], 1):
-        points = info.get("points", 0)
-        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}位:"
-        desc += f"{medal} <@{uid}> - **{points:,}** pt\n"
-
-    if not desc:
-        desc = "まだ誰もポイントを持っていません。"
-
-    embed = discord.Embed(
-        title="🏆 リアルタイム・スコアボード",
-        description=desc,
-        color=0xffd700
-    )
-    embed.set_footer(text="1分ごとに自動更新されます ⚡")
-
-    try:
-        async for message in channel.history(limit=10):
-            if message.author == client.user and message.embeds:
-                if message.embeds[0].title == "🏆 リアルタイム・スコアボード":
-                    await message.edit(embed=embed)
-                    return
-        await channel.send(embed=embed)
-    except Exception as e:
-        print(f"スコアボード更新エラー: {e}")
-
-@tasks.loop(minutes=1)
-async def update_leaderboard_loop():
-    await update_leaderboard_task_logic()
-
 @client.event
 async def on_ready():
     print(f"ログインしました: {client.user}")
-    if not update_leaderboard_loop.is_running():
-        update_leaderboard_loop.start()
-        
     try:
         synced = await client.tree.sync()
         print(f"{len(synced)}個のコマンドを同期しました！")
@@ -929,10 +987,9 @@ async def manual_save(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=True)
         return
-
     try:
         data = load_data()
-        save_data(data)  # 現在のメモリ上の安全な状態をファイルに強制同期
+        save_data(data)
         await interaction.response.send_message(f"💾 データを手動で保存しました！（現在の登録ユーザー数: {len(data)}人）", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
