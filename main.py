@@ -25,10 +25,21 @@ class FullBot(discord.Client):
 
     async def setup_hook(self):
         self.tree.on_error = self.on_app_command_error
+        # 1分ごとのランキング更新ループをバックグラウンドで開始
+        self.bg_task = self.loop.create_task(self.ranking_loop())
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         print("\n❌ エラーが発生しました ❌")
         traceback.print_exception(type(error), error, error.__traceback__)
+
+    async def ranking_loop(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                await update_all_ranking_boards(self)
+            except Exception as e:
+                print(f"⚠️ ランキング更新ループエラー: {e}")
+            await asyncio.sleep(60) # 1分ごとに実行
 
 client = FullBot()
 DATA_FILE = "data.json"
@@ -96,6 +107,92 @@ def get_user_data(uid, data: dict) -> dict:
 # --- 専用部屋チェック判定 ---
 def is_casino_room(channel: discord.TextChannel) -> bool:
     return channel.name.startswith("🎰-")
+
+# ==========================================
+# 📊 1分ごと自動更新ランキング機能
+# ==========================================
+def create_ranking_embed(guild: discord.Guild, data: dict) -> discord.Embed:
+    sorted_users = sorted(
+        data.items(),
+        key=lambda item: item[1].get("points", 0) if isinstance(item[1], dict) else 0,
+        reverse=True
+    )[:10]
+
+    desc = ""
+    medals = ["🥇", "🥈", "🥉"]
+
+    if not sorted_users:
+        desc = "まだ誰もポイントを持っていません。"
+    else:
+        for i, (uid_str, info) in enumerate(sorted_users):
+            rank_icon = medals[i] if i < 3 else f"`#{i+1}`"
+            pts = info.get("points", 0) if isinstance(info, dict) else 0
+            member = guild.get_member(int(uid_str))
+            name = member.display_name if member else f"ユーザーID: {uid_str}"
+            desc += f"{rank_icon} **{name}** : **{pts:,} pt**\n"
+
+    embed = discord.Embed(
+        title="🏆 ポイントランキング（リアルタイム）",
+        description=desc,
+        color=0xf1c40f
+    )
+    embed.set_footer(text="1分ごとに自動更新されます")
+    return embed
+
+async def update_all_ranking_boards(bot):
+    settings = load_settings()
+    data = load_data()
+    if not settings.get("ranking_channels"):
+        return
+
+    for guild_id_str, info in list(settings["ranking_channels"].items()):
+        guild = bot.get_guild(int(guild_id_str))
+        if not guild:
+            continue
+        channel = guild.get_channel(info["channel_id"])
+        if not channel:
+            continue
+        message_id = info.get("message_id")
+        embed = create_ranking_embed(guild, data)
+        try:
+            if message_id:
+                msg = await channel.fetch_message(message_id)
+                await msg.edit(embed=embed)
+            else:
+                msg = await channel.send(embed=embed)
+                info["message_id"] = msg.id
+                save_settings(settings)
+        except discord.NotFound:
+            # メッセージが消されていたら新規送信
+            msg = await channel.send(embed=embed)
+            info["message_id"] = msg.id
+            save_settings(settings)
+        except Exception as e:
+            print(f"⚠️ ランキングボード更新エラー (Guild: {guild_id_str}): {e}")
+
+@client.tree.command(name="setup_ranking", description="1分ごとに自動更新されるランキングボードをこのチャンネルに設置します（管理者限定）")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_ranking(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    channel = interaction.channel
+
+    data = load_data()
+    embed = create_ranking_embed(guild, data)
+    msg = await channel.send(embed=embed)
+
+    settings = load_settings()
+    if "ranking_channels" not in settings:
+        settings["ranking_channels"] = {}
+
+    settings["ranking_channels"][str(guild.id)] = {
+        "channel_id": channel.id,
+        "message_id": msg.id
+    }
+    save_settings(settings)
+
+    await interaction.followup.send(f"✅ このチャンネルに自動更新ランキングボードを設置しました！", ephemeral=True)
+
 
 # ==========================================
 # 専用部屋管理 View & コマンド
@@ -630,14 +727,14 @@ async def gacha(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="🎰 5000pt プレミアムガチャ結果",
-        description=f"description=獲得: **{item_name}**\n\nポイント変動: **{delta_pts - GACHA_COST:+} pt**\n現在の所持ポイント: **{user_info['points']} pt**",
+        description=f"獲得: **{item_name}**\n\nポイント変動: **{delta_pts - GACHA_COST:+} pt**\n現在の所持ポイント: **{user_info['points']} pt**",
         color=0xffd700 if delta_pts >= GACHA_COST else 0xff0000
     )
     view = GachaView(uid)
     await interaction.followup.send(embed=embed, view=view)
 
 # ==========================================
-# 5. 深海ダイブ機能（新追加）
+# 5. 深海ダイブ機能
 # ==========================================
 class DiveView(discord.ui.View):
     def __init__(self, user_id, bet, depth=0, oxygen=100):
@@ -666,15 +763,12 @@ class DiveView(discord.ui.View):
     async def dive_deeper(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         
-        # 深度が進むごとに深く（+300m〜+700m）
         add_depth = random.randint(300, 700)
         self.depth += add_depth
 
-        # 酸素消費（深いほど多く消費: 15〜35）
         oxy_loss = random.randint(15, 35) + int(self.depth / 500) * 3
         self.oxygen -= oxy_loss
 
-        # 酸素切れ または 故障・深海の裂け目（確率判定）
         if self.oxygen <= 0:
             data = load_data()
             user_info = get_user_data(self.user_id, data)
@@ -687,13 +781,10 @@ class DiveView(discord.ui.View):
             )
             return
 
-        # ランダムイベント抽選
-        # 深いほど故障率・怪物率アップ
         hazard_chance = 0.15 + (self.depth / 15000)
         roll = random.random()
 
         if roll < hazard_chance:
-            # トラブル発生
             event_type = random.choice(["fault", "monster", "crack"])
             if event_type == "fault":
                 data = load_data()
@@ -707,7 +798,6 @@ class DiveView(discord.ui.View):
                 )
                 return
             elif event_type == "monster":
-                # 深海怪物：大ダメージ or 没収
                 data = load_data()
                 user_info = get_user_data(self.user_id, data)
                 user_info["points"] -= self.bet
@@ -719,7 +809,6 @@ class DiveView(discord.ui.View):
                 )
                 return
             else:
-                # 深海の裂け目 (大当たり or 全損)
                 if random.random() < 0.5:
                     mult = self.get_multiplier(self.depth) * 2
                     payout = int(self.bet * mult)
@@ -746,7 +835,6 @@ class DiveView(discord.ui.View):
                     )
                     return
 
-        # 通常進行（お宝ゲット等）
         mult = self.get_multiplier(self.depth)
         events = ["貝 (x1.2)", "宝石 (x2)", "沈没財宝 (x3)", "巨大生物 (x5)"]
         ev = random.choice(events)
@@ -819,14 +907,14 @@ async def dive(interaction: discord.Interaction, bet: int):
     )
 
 # ==========================================
-# 6. おみくじ・ランキング・その他
+# 6. おみくじ・その他
 # ==========================================
 @client.tree.command(name="omikuji", description="今日の運勢を占います")
 async def omikuji(interaction: discord.Interaction):
     fortunes = ["大吉 🌟", "中吉 🌸", "小吉 ☘️", "吉 ✨", "末吉 🍃", "凶 ☁️"]
     await interaction.response.send_message(f"⛩️ **おみくじ結果:** 【 **{random.choice(fortunes)}** 】")
 
-# ロール付与・チケット等の機能はそのまま保持
+# 認証パネル
 class VerifyView(discord.ui.View):
     def __init__(self, role_id: int):
         super().__init__(timeout=None)
