@@ -32,6 +32,7 @@ class FullBot(discord.Client):
 
 client = FullBot()
 DATA_FILE = "data.json"
+SETTING_FILE = "settings.json"  # スコアボード設置場所の保存用ファイル
 INITIAL_POINTS = 300  # 救済ポイント
 
 # --- データ管理 ---
@@ -50,6 +51,23 @@ def save_data(data):
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
         print(f"⚠️ 保存エラー: {e}")
+
+# --- 設定データ管理（スコアボード設置チャンネル用） ---
+def load_settings():
+    if not os.path.exists(SETTING_FILE):
+        return {}
+    try:
+        with open(SETTING_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_settings(settings):
+    try:
+        with open(SETTING_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"⚠️ 設定保存エラー: {e}")
 
 def get_user_data(uid, data: dict) -> dict:
     uid_str = str(uid)
@@ -82,7 +100,8 @@ class CloseRoomView(discord.ui.View):
         await interaction.channel.delete()
 
 @client.tree.command(name="casino", description="あなた専用のプライベートカジノ部屋を作成します")
-async def casino(interaction: discord.Interaction):
+@app_commands.describe(category="部屋を作成するカテゴリーを指定します（省略時はこのコマンドを実行した場所と同じカテゴリー）")
+async def casino(interaction: discord.Interaction, category: discord.CategoryChannel = None):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
     user = interaction.user
@@ -94,6 +113,8 @@ async def casino(interaction: discord.Interaction):
         await interaction.followup.send(f"⚠️ すでにあなた専用のカジノ部屋があります！ 👉 {existing_channel.mention}", ephemeral=True)
         return
 
+    target_category = category if category is not None else interaction.channel.category
+
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -101,11 +122,10 @@ async def casino(interaction: discord.Interaction):
     }
 
     try:
-        category = interaction.channel.category
         channel = await guild.create_text_channel(
             name=room_name,
             overwrites=overwrites,
-            category=category,
+            category=target_category,
             topic=f"{user.display_name} 専用カジノルーム"
         )
 
@@ -296,7 +316,7 @@ async def slot(interaction: discord.Interaction, bet: int):
         f"🎰 **スロット**（賭け金: **{bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
         view=view
     )
-    
+
 # ==========================================
 # 2. ブラックジャック機能
 # ==========================================
@@ -752,8 +772,9 @@ class CloseTicketView(discord.ui.View):
             pass
 
 class TicketSetupView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, target_category: discord.CategoryChannel = None):
         super().__init__(timeout=None)
+        self.target_category = target_category
 
     @discord.ui.button(label="🎫 お問い合わせを作成", style=discord.ButtonStyle.primary, custom_id="create_ticket_button")
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -768,6 +789,8 @@ class TicketSetupView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
+        category = self.target_category if self.target_category is not None else interaction.channel.category
+
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
@@ -775,7 +798,6 @@ class TicketSetupView(discord.ui.View):
         }
 
         try:
-            category = interaction.channel.category
             channel = await guild.create_text_channel(
                 name=ticket_name,
                 overwrites=overwrites,
@@ -792,30 +814,48 @@ class TicketSetupView(discord.ui.View):
             await interaction.followup.send(f"✅ お問い合わせチャンネルを作成しました！ 👉 {channel.mention}", ephemeral=True)
 
         except discord.Forbidden:
-            await interaction.followup.send("⚠️ Botに「チャンネルの管理」権限がないため、チケットを作成できませんでした。", ephemeral=True)
+            await interaction.followup.send("⚠️ Botにチャンネル作成・管理権限がありません。", ephemeral=True)
 
 @client.tree.command(name="setup_ticket", description="問い合わせ用のパネルを設置します（管理者限定）")
+@app_commands.describe(
+    description="パネルに表示する説明文を入力してください",
+    category="チケットを作成するカテゴリーを指定します（省略時はこのコマンドを実行した場所と同じカテゴリー）"
+)
 @app_commands.checks.has_permissions(administrator=True)
-async def setup_ticket(interaction: discord.Interaction):
+async def setup_ticket(interaction: discord.Interaction, description: str, category: discord.CategoryChannel = None):
     embed = discord.Embed(
         title="🎫 お問い合わせ / サポート",
-        description="ご質問やご用件がある場合は、下のボタンを押して専用の問い合わせチャンネルを作成してください。",
+        description=description,
         color=0x3498db
     )
-    view = TicketSetupView()
+    view = TicketSetupView(target_category=category)
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message("✅ 問い合わせパネルを設置しました！", ephemeral=True)
 
 from discord.ext import tasks
 
 # ==========================================
-# 🏆 1分ごとのリアルタイム・スコアボード機能
+# 🏆 8. リアルタイム・スコアボード機能（場所指定可能）
 # ==========================================
-LEADERBOARD_CHANNEL_ID = 1544995288459116584  
+@client.tree.command(name="setup_leaderboard", description="このチャンネルをリアルタイムスコアボードの設置場所に指定します（管理者限定）")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_leaderboard(interaction: discord.Interaction):
+    settings = load_settings()
+    settings["leaderboard_channel_id"] = interaction.channel.id
+    save_settings(settings)
+    
+    await interaction.response.send_message(f"✅ このチャンネル ({interaction.channel.mention}) をスコアボードの設置場所に設定しました！1分以内にランキングが表示されます。", ephemeral=True)
+    
+    # 即時初回更新を実行
+    await update_leaderboard_task_logic()
 
-@tasks.loop(minutes=1)
-async def update_leaderboard():
-    channel = client.get_channel(LEADERBOARD_CHANNEL_ID)
+async def update_leaderboard_task_logic():
+    settings = load_settings()
+    channel_id = settings.get("leaderboard_channel_id")
+    if not channel_id:
+        return
+    
+    channel = client.get_channel(channel_id)
     if not channel:
         return
     
@@ -845,19 +885,26 @@ async def update_leaderboard():
     )
     embed.set_footer(text="1分ごとに自動更新されます ⚡")
 
-    async for message in channel.history(limit=10):
-        if message.author == client.user and message.embeds:
-            if message.embeds[0].title == "🏆 リアルタイム・スコアボード":
-                await message.edit(embed=embed)
-                return
+    try:
+        async for message in channel.history(limit=10):
+            if message.author == client.user and message.embeds:
+                if message.embeds[0].title == "🏆 リアルタイム・スコアボード":
+                    await message.edit(embed=embed)
+                    return
+        # 既存がなければ新しく投稿
+        await channel.send(embed=embed)
+    except Exception as e:
+        print(f"スコアボード更新エラー: {e}")
 
-    await channel.send(embed=embed)
+@tasks.loop(minutes=1)
+async def update_leaderboard_loop():
+    await update_leaderboard_task_logic()
 
 @client.event
 async def on_ready():
     print(f"ログインしました: {client.user}")
-    if not update_leaderboard.is_running():
-        update_leaderboard.start()
+    if not update_leaderboard_loop.is_running():
+        update_leaderboard_loop.start()
         
     try:
         synced = await client.tree.sync()
