@@ -1034,8 +1034,8 @@ class HaikouView(discord.ui.View):
     def get_haikou_multiplier(self, floor):
         if floor >= 10: return 25.0
         elif floor >= 7: return 10.0
-        elif floor >= 5: return 5.0
-        elif floor >= 3: return 2.0
+        elif floor >= 5: return 2.0
+        elif floor >= 3: return 1.6
         elif floor >= 2: return 1.3
         return 1.0
 
