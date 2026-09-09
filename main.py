@@ -324,7 +324,7 @@ class ChangeBetModal(discord.ui.Modal):
                 content=(
                     f"🌊 **深海ダイブ開始！**（賭け金: **{new_bet} pt**）\n"
                     f"・現在の深度: **0 m**（倍率: **×1.0**）\n"
-                    f"・残り酸素: **100**\n\n"
+                    f"・残り酸素: **100 / 100**\n\n"
                     f"ボタンを押して潜水を始めてください👇"
                 ),
                 view=view
@@ -766,7 +766,7 @@ async def gacha(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, view=view)
 
 # ==========================================
-# 5. 深海ダイブ機能
+# 5. 深海ダイブ機能（酸素回復イベント搭載）
 # ==========================================
 class DivePlayAgainView(discord.ui.View):
     def __init__(self, user_id, bet):
@@ -797,7 +797,7 @@ class DivePlayAgainView(discord.ui.View):
             content=(
                 f"🌊 **深海ダイブ開始！**（賭け金: **{self.bet} pt**）\n"
                 f"・現在の深度: **0 m**（倍率: **×1.0**）\n"
-                f"・残り酸素: **100**\n\n"
+                f"・残り酸素: **100 / 100**\n\n"
                 f"ボタンを押して潜水を始めてください👇"
             ),
             view=view
@@ -842,17 +842,32 @@ class DiveView(discord.ui.View):
 
         again_view = DivePlayAgainView(self.user_id, self.bet)
 
+        # 酸素回復イベント（残り酸素が0以下になる前に、20%の確率で緊急酸素ボンベを発見して回復）
         if self.oxygen <= 0:
-            data = load_data()
-            user_info = get_user_data(self.user_id, data)
-            user_info["points"] -= self.bet
-            save_data(data)
-            self.stop()
-            await interaction.message.edit(
-                content=f"💀 **酸素が尽きて意識を失いました...（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
-                view=again_view
-            )
-            return
+            if random.random() < 0.20:
+                recovered_oxy = random.randint(30, 60)
+                self.oxygen += recovered_oxy
+                ev = f"🫧 【奇跡】海底基地の残骸から予備酸素ボンベを発見！酸素が **+{recovered_oxy}** 回復した！"
+            else:
+                data = load_data()
+                user_info = get_user_data(self.user_id, data)
+                user_info["points"] -= self.bet
+                save_data(data)
+                self.stop()
+                await interaction.message.edit(
+                    content=f"💀 **酸素が尽きて意識を失いました...（深度: {self.depth}m）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
+                    view=again_view
+                )
+                return
+        else:
+            # 通常進行時のランダム酸素回復オアシスイベント（約15%の確率）
+            if random.random() < 0.15:
+                recovered_oxy = random.randint(20, 50)
+                self.oxygen = min(100, self.oxygen + recovered_oxy)
+                ev = f"🌟 【幸運】海底温泉の気泡を採取！酸素が **+{recovered_oxy}** 回復した！（現在: {self.oxygen}/100）"
+            else:
+                events = ["貝 (x1.2)", "宝石 (x2)", "沈没財宝 (x3)", "巨大生物 (x5)"]
+                ev = random.choice(events)
 
         hazard_chance = 0.15 + (self.depth / 15000)
         roll = random.random()
@@ -904,16 +919,14 @@ class DiveView(discord.ui.View):
                     return
 
         mult = self.get_multiplier(self.depth)
-        events = ["貝 (x1.2)", "宝石 (x2)", "沈没財宝 (x3)", "巨大生物 (x5)"]
-        ev = random.choice(events)
 
         await interaction.message.edit(
             content=(
                 f"🌊 **深海ダイブ中...**\n"
                 f"・掛け金: **{self.bet} pt**\n"
                 f"・現在の深度: **{self.depth} m** （倍率: **×{mult}**）\n"
-                f"・残り酸素: **{self.oxygen}**\n"
-                f"・直近の発見: **{ev}**\n\n"
+                f"・残り酸素: **{self.oxygen} / 100**\n"
+                f"・イベント/発見: **{ev}**\n\n"
                 f"さらに深く潜りますか？それとも浮上して配当を確定させますか？"
             ),
             view=self
@@ -970,13 +983,13 @@ async def dive(interaction: discord.Interaction, bet: int):
         f"🌊 **深海ダイブ開始！**\n"
         f"・掛け金: **{bet} pt**\n"
         f"・現在の深度: **0 m**（倍率: **×1.0**）\n"
-        f"・残り酸素: **100**\n\n"
+        f"・残り酸素: **100 / 100**\n\n"
         f"ボタンを押して潜水を始めてください👇",
         view=view
     )
 
 # ==========================================
-# 6. 廃校探索機能 (新追加)
+# 6. 廃校探索機能（正気度回復イベント搭載）
 # ==========================================
 class HaikouPlayAgainView(discord.ui.View):
     def __init__(self, user_id, bet):
@@ -1034,8 +1047,8 @@ class HaikouView(discord.ui.View):
     def get_haikou_multiplier(self, floor):
         if floor >= 10: return 25.0
         elif floor >= 7: return 10.0
-        elif floor >= 5: return 2.0
-        elif floor >= 3: return 1.6
+        elif floor >= 5: return 5.0
+        elif floor >= 3: return 2.0
         elif floor >= 2: return 1.3
         return 1.0
 
@@ -1049,17 +1062,32 @@ class HaikouView(discord.ui.View):
 
         again_view = HaikouPlayAgainView(self.user_id, self.bet)
 
+        # 正気度回復イベント（正気度が0以下になる前に、20%の確率で「お札や休息スペース」を見つけて回復）
         if self.sanity <= 0:
-            data = load_data()
-            user_info = get_user_data(self.user_id, data)
-            user_info["points"] -= self.bet
-            save_data(data)
-            self.stop()
-            await interaction.message.edit(
-                content=f"👻 **正気度がゼロになり、闇に飲まれました...（到達: {self.floor}階）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
-                view=again_view
-            )
-            return
+            if random.random() < 0.20:
+                recovered_sanity = random.randint(30, 60)
+                self.sanity += recovered_sanity
+                enc = f"✨ 【奇跡】保健室のベッドで仮眠をとれた！正気度が **+{recovered_sanity}** 回復した！"
+            else:
+                data = load_data()
+                user_info = get_user_data(self.user_id, data)
+                user_info["points"] -= self.bet
+                save_data(data)
+                self.stop()
+                await interaction.message.edit(
+                    content=f"👻 **正気度がゼロになり、闇に飲まれました...（到達: {self.floor}階）**\n**-{self.bet} pt**（所持: **{user_info['points']} pt**）",
+                    view=again_view
+                )
+                return
+        else:
+            # 通常進行時のランダム正気度回復イベント（約15%の確率）
+            if random.random() < 0.15:
+                recovered_sanity = random.randint(20, 50)
+                self.sanity = min(100, self.sanity + recovered_sanity)
+                enc = f"🍵 【幸運】職員室で温かいお茶を見つけてホッとした…正気度が **+{recovered_sanity}** 回復！（現在: {self.sanity}/100）"
+            else:
+                encounters = ["誰もいない教室 (x1.2)", "古びた教科書 (x1.5)", "赤い目の日本人形 (x2.0)", "職員室の置き手紙 (x3.0)"]
+                enc = random.choice(encounters)
 
         trap_chance = 0.2 + (self.floor / 30.0)
         roll = random.random()
@@ -1111,8 +1139,6 @@ class HaikouView(discord.ui.View):
                     return
 
         mult = self.get_haikou_multiplier(self.floor)
-        encounters = ["誰もいない教室 (x1.2)", "古びた教科書 (x1.5)", "赤い目の日本人形 (x2.0)", "職員室の置き手紙 (x3.0)"]
-        enc = random.choice(encounters)
 
         await interaction.message.edit(
             content=(
@@ -1120,7 +1146,7 @@ class HaikouView(discord.ui.View):
                 f"・賭け金: **{self.bet} pt**\n"
                 f"・現在の階層: **{self.floor} 階**（倍率: **×{mult}**）\n"
                 f"・正気度: **{self.sanity} / 100**\n"
-                f"・不気味な気配: **{enc}**\n\n"
+                f"・イベント/気配: **{enc}**\n\n"
                 f"さらに奥へ進みますか？それとも正気なうちに脱出しますか？"
             ),
             view=self
@@ -1183,7 +1209,7 @@ async def haikou(interaction: discord.Interaction, bet: int):
     )
 
 # ==========================================
-# 6. おみくじ・その他
+# 7. おみくじ・その他
 # ==========================================
 @client.tree.command(name="omikuji", description="今日の運勢を占います")
 async def omikuji(interaction: discord.Interaction):
