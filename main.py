@@ -18,11 +18,14 @@ from discord import app_commands
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # ユーザー名取得に必要
+intents.voice_states = True # VCの状態取得に必要
 
 class FullBot(discord.Client):
     def __init__(self):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
+        # 読み上げ君用の設定 (guild_id: {"voice_channel": channel, "voice_client": vc, "voice_type": type})
+        self.tts_settings = {}
 
     async def setup_hook(self):
         self.tree.on_error = self.on_app_command_error
@@ -108,6 +111,193 @@ def get_user_data(uid, data: dict) -> dict:
 # --- 専用部屋チェック判定 ---
 def is_casino_room(channel: discord.TextChannel) -> bool:
     return channel.name.startswith("🎰-")
+
+
+# ==========================================
+# 🔊 一時VC & 読み上げ君（VC拡張）機能
+# ==========================================
+
+# 一時VCの設定変更モーダル
+class EditVettingModal(discord.ui.Modal):
+    def __init__(self, vc_channel: discord.VoiceChannel):
+        super().__init__(title="一時VCの設定変更")
+        self.vc_channel = vc_channel
+
+        self.new_name = discord.ui.TextInput(
+            label="チャンネル名",
+            default=vc_channel.name,
+            max_length=50,
+            required=True
+        )
+        self.new_limit = discord.ui.TextInput(
+            label="人数制限 (無制限は0)",
+            default=str(vc_channel.user_limit),
+            max_length=2,
+            required=True
+        )
+        self.add_item(self.new_name)
+        self.add_item(self.new_limit)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            limit = int(self.new_limit.value)
+            if limit < 0 or limit > 99:
+                raise ValueError()
+        except ValueError:
+            await interaction.response.send_message("⚠️ 人数制限は0〜99の数字で入力してください。", ephemeral=True)
+            return
+
+        await self.vc_channel.edit(name=self.new_name.value, user_limit=limit)
+        await interaction.response.send_message(f"✅ ボイスチャンネルの設定を更新しました！\n・名前: `{self.new_name.value}`\n・人数制限: `{limit if limit > 0 else '無制限'}`", ephemeral=True)
+
+class TempVCControlView(discord.ui.View):
+    def __init__(self, vc_channel: discord.VoiceChannel):
+        super().__init__(timeout=None)
+        self.vc_channel = vc_channel
+
+    @discord.ui.button(label="⚙️ VC設定を変更", style=discord.ButtonStyle.primary, custom_id="edit_temp_vc")
+    async def edit_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # チャンネルの管理者または作成者判定を入れたい場合はここに記述
+        await interaction.response.send_modal(EditVettingModal(self.vc_channel))
+
+    @discord.ui.button(label="🚪 VCを今すぐ削除", style=discord.ButtonStyle.danger, custom_id="delete_temp_vc")
+    async def delete_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🗑️ ボイスチャンネルを削除します...", ephemeral=True)
+        try:
+            await self.vc_channel.delete()
+        except Exception:
+            pass
+
+@client.tree.command(name="vccreate", description="一時的なボイスチャンネルを作成します（人がいなくなると自動削除）")
+@app_commands.describe(
+    name="作成するボイスチャンネルの名前",
+    limit="人数制限（省略時は無制限）"
+)
+async def vccreate(interaction: discord.Interaction, name: str, limit: int = 0):
+    guild = interaction.guild
+    user = interaction.user
+    category = interaction.channel.category
+
+    if limit < 0 or limit > 99:
+        await interaction.response.send_message("⚠️ 人数制限は0〜99の間で指定してください。", ephemeral=True)
+        return
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(connect=True, speak=True),
+        guild.me: discord.PermissionOverwrite(manage_channels=True, connect=True)
+    }
+
+    try:
+        vc = await guild.create_voice_channel(
+            name=name,
+            user_limit=limit,
+            category=category,
+            overwrites=overwrites,
+            topic=f"作成者: {user.display_name} (誰もいなくなると自動削除されます)"
+        )
+        view = TempVCControlView(vc)
+        await interaction.response.send_message(
+            f"✅ 一時ボイスチャンネルを作成しました！ 👉 {vc.mention}\n(チャンネルのメンバーが0人になると自動で削除されます)",
+            ephemeral=True
+        )
+        # 管理用テキストをVCチャット等に送ることも可能
+    except discord.Forbidden:
+        await interaction.response.send_message("⚠️ ボットにチャンネル作成権限がありません。", ephemeral=True)
+
+# 誰もいなくなったらVCを自動削除するイベント
+@client.event
+async def on_voice_state_update(member, before, after):
+    # 誰かがVCから退出、または移動したとき
+    if before.channel and before.channel != after.channel:
+        vc = before.channel
+        # Botが作成した、あるいはトピックに「自動削除」が含まれる、または特定の名前の部屋などの条件
+        # ここでは「メンバーが自分（Bot含む）を除いて誰もいなくなった場合」を一時VCとみなして削除
+        # もし特定の条件に絞りたい場合はチャンネル名やトピックで判定してください
+        if len(vc.members) == 0:
+            # 安全のためデフォルトの常設チャンネルなどでないか確認（例として名前に特定の文字が含まれる、あるいは管理対象）
+            # ここでは空になったボイスチャンネルを自動削除する処理
+            try:
+                # 念のため作成者情報やトピックを確認して削除
+                if vc.topic and "作成者:" in vc.topic:
+                    await vc.delete()
+            except Exception:
+                pass
+
+
+# --- 読み上げ君（TTS）機能 ---
+@client.tree.command(name="join", description="テキストの読み上げを行うため、あなたのいるボイスチャンネルに参加します")
+async def join(interaction: discord.Interaction):
+    if not interaction.user.voice:
+        await interaction.response.send_message("⚠️ 先にボイスチャンネルに参加してください！", ephemeral=True)
+        return
+
+    vc_channel = interaction.user.voice.channel
+    guild_id = interaction.guild.id
+
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.move_to(vc_channel)
+        await interaction.response.send_message(f"🔊 ボイスチャンネルを {vc_channel.mention} に移動しました！", ephemeral=True)
+    else:
+        try:
+            vc_client = await vc_channel.connect()
+            client.tts_settings[guild_id] = {
+                "voice_channel": vc_channel.id,
+                "voice_client": vc_client,
+                "voice_type": "standard"
+            }
+            await interaction.response.send_message(f"🔊 {vc_channel.mention} に接続し、読み上げを開始します！", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 接続に失敗しました: {e}", ephemeral=True)
+
+@client.tree.command(name="leave", description="ボイスチャンネルから退出します")
+async def leave(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        if guild_id in client.tts_settings:
+            del client.tts_settings[guild_id]
+        await interaction.response.send_message("👋 ボイスチャンネルから退出しました。", ephemeral=True)
+    else:
+        await interaction.response.send_message("⚠️ Botはボイスチャンネルに参加していません。", ephemeral=Type if 'Type' in globals() else True)
+
+@client.tree.command(name="voice", description="読み上げの声の種類を変更します")
+@app_commands.describe(voice_type="声の種類を選んでください")
+@app_commands.choices(voice_type=[
+    app_commands.Choice(name="標準（男性風）", value="standard_m"),
+    app_commands.Choice(name="標準（女性風）", value="standard_f"),
+    app_commands.Choice(name="高音・元気", value="high_cheerful"),
+    app_commands.Choice(name="低音・落ち着き", value="low_calm"),
+])
+async def voice(interaction: discord.Interaction, voice_type: str):
+    guild_id = interaction.guild.id
+    if guild_id not in client.tts_settings:
+        client.tts_settings[guild_id] = {}
+    
+    client.tts_settings[guild_id]["voice_type"] = voice_type
+    await interaction.response.send_message(f"🗣️ 読み上げの声の設定を **{voice_type}** に変更しました！", ephemeral=True)
+
+# メッセージ送信時の読み上げ処理
+@client.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+    
+    guild = message.guild
+    if not guild:
+        return
+
+    guild_id = guild.id
+    # BotがVCに参加していて、かつ同じサーバーからのメッセージの場合
+    if guild.voice_client and guild_id in client.tts_settings:
+        # コマンド（スラッシュコマンド等）やプレフィックスメッセージは除外したい場合は調整
+        if message.content.startswith("/"):
+            return
+
+        # ここでTTS（音声合成）処理を行います。
+        # 実環境でGTTSやVOICEVOX、Discordの音声出力ライブラリ(gTTS + ffmpeg等)を紐づけることで読み上げが可能です。
+        # 例: gTTSで音声ファイルを生成して再生するなど
+        print(f"🎤 [読み上げ対象] {message.author.display_name}: {message.content}")
+
 
 # ==========================================
 # 📊 1分ごと自動更新ランキング機能（名前表示対応）
@@ -687,16 +877,16 @@ async def janken(interaction: discord.Interaction, bet: int):
 # ==========================================
 GACHA_COST = 5000
 GACHA_ITEMS = [
-    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 3),
+    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
     ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 4),
     ("🌟 SR: 黄金の塊（大ヒット）", 30000, 6),
-    ("💎 R: 宝石の袋（中ヒット）", 15000, 8),
-    ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 50),
-    ("☘️ N: トントン（元取り）", 5000, 70),
-    ("💸 N: ポケットの穴（ちょっと減少）", 3000, 60),
+    ("💎 R: 宝石の袋（中ヒット）", 15000, 10),
+    ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
+    ("☘️ N: トントン（元取り）", 5000, 20),
+    ("💸 N: ポケットの穴（ちょっと減少）", 3000, 40),
     ("🍂 N: スリ被害（半分没収）", 1000, 30),
-    ("💀 N: 一文無し体験（スカ）", 0, 10),
-    ("💣 E: 大爆発（大損・完全無）", -15000, 5)
+    ("💀 N: 一文無し体験（スカ）", 0, 20),
+    ("💣 E: 大爆発（大損・完全無）", -15000, 14)
 ]
 
 def draw_gacha():
@@ -842,7 +1032,6 @@ class DiveView(discord.ui.View):
 
         again_view = DivePlayAgainView(self.user_id, self.bet)
 
-        # 酸素回復イベント（残り酸素が0以下になる前に、20%の確率で緊急酸素ボンベを発見して回復）
         if self.oxygen <= 0:
             if random.random() < 0.20:
                 recovered_oxy = random.randint(30, 60)
@@ -860,7 +1049,6 @@ class DiveView(discord.ui.View):
                 )
                 return
         else:
-            # 通常進行時のランダム酸素回復オアシスイベント（約15%の確率）
             if random.random() < 0.15:
                 recovered_oxy = random.randint(20, 50)
                 self.oxygen = min(100, self.oxygen + recovered_oxy)
@@ -1062,7 +1250,6 @@ class HaikouView(discord.ui.View):
 
         again_view = HaikouPlayAgainView(self.user_id, self.bet)
 
-        # 正気度回復イベント（正気度が0以下になる前に、20%の確率で「お札や休息スペース」を見つけて回復）
         if self.sanity <= 0:
             if random.random() < 0.20:
                 recovered_sanity = random.randint(30, 60)
@@ -1080,7 +1267,6 @@ class HaikouView(discord.ui.View):
                 )
                 return
         else:
-            # 通常進行時のランダム正気度回復イベント（約15%の確率）
             if random.random() < 0.15:
                 recovered_sanity = random.randint(20, 50)
                 self.sanity = min(100, self.sanity + recovered_sanity)
@@ -1385,7 +1571,6 @@ async def manual_save(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
 
 # ── ボット起動・サーバー処理 ──
-import os
 import threading
 
 def run_flask():
