@@ -1,31 +1,34 @@
 from flask import Flask
+import json
+import random
+import os
+import traceback
+import asyncio
+from datetime import datetime, timedelta
+import discord
+from discord import app_commands
 
+# --- Flaskサーバー設定 ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is running!"
 
-import json
-import random
-import os
-import traceback
-import asyncio
-import discord
-from discord import app_commands
+def run_flask():
+    app.run(host="0.0.0.0", port=8000)
 
-# --- 設定 ---
+
+# --- ボットの設定 ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # ユーザー名取得に必要
-intents.voice_states = True # VCの状態取得に必要
+intents.voice_states = True # VCの監視に必要
 
 class FullBot(discord.Client):
     def __init__(self):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
-        # 読み上げ君用の設定 (guild_id: {"voice_channel": channel, "voice_client": vc, "voice_type": type})
-        self.tts_settings = {}
 
     async def setup_hook(self):
         self.tree.on_error = self.on_app_command_error
@@ -49,6 +52,9 @@ client = FullBot()
 DATA_FILE = "data.json"
 SETTING_FILE = "settings.json"
 INITIAL_POINTS = 300  # 救済ポイント
+
+# 募集情報を管理する辞書 {message_id: data}
+active_recruitments = {}
 
 # --- 安全なデータ管理 ---
 def load_data():
@@ -114,193 +120,191 @@ def is_casino_room(channel: discord.TextChannel) -> bool:
 
 
 # ==========================================
-# 🔊 一時VC & 読み上げ君（VC拡張）機能
+# 📢 メンバー募集 & 自動VC機能
 # ==========================================
-
-# 一時VCの設定変更モーダル
-class EditVettingModal(discord.ui.Modal):
-    def __init__(self, vc_channel: discord.VoiceChannel):
-        super().__init__(title="一時VCの設定変更")
-        self.vc_channel = vc_channel
-
-        self.new_name = discord.ui.TextInput(
-            label="チャンネル名",
-            default=vc_channel.name,
-            max_length=50,
-            required=True
-        )
-        self.new_limit = discord.ui.TextInput(
-            label="人数制限 (無制限は0)",
-            default=str(vc_channel.user_limit),
-            max_length=2,
-            required=True
-        )
-        self.add_item(self.new_name)
-        self.add_item(self.new_limit)
+class RecruitModal(discord.ui.Modal, title="メンバー募集を作成"):
+    game_title = discord.ui.TextInput(
+        label="ゲームタイトル",
+        placeholder="例: Minecraft, VALORANT など",
+        required=True,
+        max_length=50
+    )
+    mode = discord.ui.TextInput(
+        label="モード / 条件",
+        placeholder="例: サバイバル, コンペティティブ など",
+        required=True,
+        max_length=50
+    )
+    max_members = discord.ui.TextInput(
+        label="募集人数 (数字のみ)",
+        placeholder="例: 4",
+        required=True,
+        max_length=2
+    )
+    duration_hours = discord.ui.TextInput(
+        label="募集期限 (時間・数字のみ)",
+        placeholder="例: 2 (2時間後まで)",
+        required=True,
+        max_length=2
+    )
+    comment = discord.ui.TextInput(
+        label="一言メッセージ",
+        placeholder="例: のんびり遊びたいです！",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=200
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            limit = int(self.new_limit.value)
-            if limit < 0 or limit > 99:
-                raise ValueError()
+            max_num = int(self.max_members.value)
+            hours = int(self.duration_hours.value)
         except ValueError:
-            await interaction.response.send_message("⚠️ 人数制限は0〜99の数字で入力してください。", ephemeral=True)
+            await interaction.response.send_message("❌ 募集人数と募集期限は半角数字で入力してください。", ephemeral=True)
             return
 
-        await self.vc_channel.edit(name=self.new_name.value, user_limit=limit)
-        await interaction.response.send_message(f"✅ ボイスチャンネルの設定を更新しました！\n・名前: `{self.new_name.value}`\n・人数制限: `{limit if limit > 0 else '無制限'}`", ephemeral=True)
-
-class TempVCControlView(discord.ui.View):
-    def __init__(self, vc_channel: discord.VoiceChannel):
-        super().__init__(timeout=None)
-        self.vc_channel = vc_channel
-
-    @discord.ui.button(label="⚙️ VC設定を変更", style=discord.ButtonStyle.primary, custom_id="edit_temp_vc")
-    async def edit_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # チャンネルの管理者または作成者判定を入れたい場合はここに記述
-        await interaction.response.send_modal(EditVettingModal(self.vc_channel))
-
-    @discord.ui.button(label="🚪 VCを今すぐ削除", style=discord.ButtonStyle.danger, custom_id="delete_temp_vc")
-    async def delete_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("🗑️ ボイスチャンネルを削除します...", ephemeral=True)
+        guild = interaction.guild
+        vc_name = f"{self.game_title.value} VC"
+        
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
+        }
+        
         try:
-            await self.vc_channel.delete()
-        except Exception:
-            pass
+            new_vc = await guild.create_voice_channel(name=vc_name, user_limit=max_num, overwrites=overwrites)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ ボイスチャンネルの作成に失敗しました: {e}", ephemeral=True)
+            return
 
-@client.tree.command(name="vccreate", description="一時的なボイスチャンネルを作成します（人がいなくなると自動削除）")
-@app_commands.describe(
-    name="作成するボイスチャンネルの名前",
-    limit="人数制限（省略時は無制限）"
-)
-async def vccreate(interaction: discord.Interaction, name: str, limit: int = 0):
-    guild = interaction.guild
-    user = interaction.user
-    category = interaction.channel.category
+        expires_at = datetime.now() + timedelta(hours=hours)
 
-    if limit < 0 or limit > 99:
-        await interaction.response.send_message("⚠️ 人数制限は0〜99の間で指定してください。", ephemeral=True)
-        return
+        data = {
+            "host_id": interaction.user.id,
+            "host_name": interaction.user.display_name,
+            "game": self.game_title.value,
+            "mode": self.mode.value,
+            "max_members": max_num,
+            "members": [interaction.user.id], # 主催者は自動参加
+            "vc_id": new_vc.id,
+            "expires_at": expires_at,
+            "comment": self.comment.value if self.comment.value else "なし",
+            "active": True
+        }
 
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(connect=True, speak=True),
-        guild.me: discord.PermissionOverwrite(manage_channels=True, connect=True)
-    }
+        embed = create_recruit_embed(data)
+        view = RecruitView(data)
 
-    try:
-        vc = await guild.create_voice_channel(
-            name=name,
-            user_limit=limit,
-            category=category,
-            overwrites=overwrites,
-            topic=f"作成者: {user.display_name} (誰もいなくなると自動削除されます)"
-        )
-        view = TempVCControlView(vc)
-        await interaction.response.send_message(
-            f"✅ 一時ボイスチャンネルを作成しました！ 👉 {vc.mention}\n(チャンネルのメンバーが0人になると自動で削除されます)",
-            ephemeral=True
-        )
-        # 管理用テキストをVCチャット等に送ることも可能
-    except discord.Forbidden:
-        await interaction.response.send_message("⚠️ ボットにチャンネル作成権限がありません。", ephemeral=True)
+        await interaction.response.send_message("📢 募集カードを作成しました！", ephemeral=True)
+        message = await interaction.channel.send(embed=embed, view=view)
+        
+        data["message_id"] = message.id
+        active_recruitments[message.id] = data
 
-# 誰もいなくなったらVCを自動削除するイベント
-@client.event
-async def on_voice_state_update(member, before, after):
-    # 誰かがVCから退出、または移動したとき
-    if before.channel and before.channel != after.channel:
-        vc = before.channel
-        # Botが作成した、あるいはトピックに「自動削除」が含まれる、または特定の名前の部屋などの条件
-        # ここでは「メンバーが自分（Bot含む）を除いて誰もいなくなった場合」を一時VCとみなして削除
-        # もし特定の条件に絞りたい場合はチャンネル名やトピックで判定してください
-        if len(vc.members) == 0:
-            # 安全のためデフォルトの常設チャンネルなどでないか確認（例として名前に特定の文字が含まれる、あるいは管理対象）
-            # ここでは空になったボイスチャンネルを自動削除する処理
+def create_recruit_embed(data):
+    current_count = len(data["members"])
+    
+    time_left = data["expires_at"] - datetime.now()
+    hours_left = max(0, int(time_left.total_seconds() // 3600))
+    mins_left = max(0, int((time_left.total_seconds() % 3600) // 60))
+
+    embed = discord.Embed(
+        title=f"🎤 {data['game']} メンバー募集",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="👑 募集主", value=data["host_name"], inline=False)
+    embed.add_field(name="🎮 モード", value=data["mode"], inline=False)
+    embed.add_field(name="👥 募集人数", value=f"{current_count} / {data['max_members']}", inline=False)
+    embed.add_field(name="🎤 VC", value=f"<#{data['vc_id']}>", inline=False)
+    embed.add_field(name="⏰ 募集期限", value=f"あと {hours_left}時間 {mins_left}分", inline=False)
+    embed.add_field(name="📝 一言", value=data["comment"], inline=False)
+    embed.add_field(name="参加者一覧", value=", ".join([f"<@{uid}>" for uid in data["members"]]) if data["members"] else "なし", inline=False)
+    
+    return embed
+
+class RecruitView(discord.ui.View):
+    def __init__(self, data):
+        super().__init__(timeout=None)
+        self.data = data
+        if not data["active"]:
+            self.disable_all()
+
+    def disable_all(self):
+        for child in self.children:
+            child.disabled = True
+
+    @discord.ui.button(label="参加する", style=discord.ButtonStyle.green, custom_id="recruit_join")
+    async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = active_recruitments.get(interaction.message.id)
+        if not data or not data["active"]:
+            await interaction.response.send_message("❌ この募集はすでに終了しています。", ephemeral=True)
+            return
+
+        if interaction.user.id in data["members"]:
+            await interaction.response.send_message("⚠️ すでに参加しています。", ephemeral=True)
+            return
+
+        if len(data["members"]) >= data["max_members"]:
+            await interaction.response.send_message("❌ 募集人数が上限に達しています。", ephemeral=True)
+            return
+
+        data["members"].append(interaction.user.id)
+
+        if len(data["members"]) >= data["max_members"]:
+            data["active"] = False
+            self.disable_all()
+
+        embed = create_recruit_embed(data)
+        await interaction.message.edit(embed=embed, view=self)
+        await interaction.response.send_message("✅ 募集に参加しました！作成されたVCをご利用ください。", ephemeral=True)
+
+    @discord.ui.button(label="募集を終了", style=discord.ButtonStyle.red, custom_id="recruit_cancel")
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = active_recruitments.get(interaction.message.id)
+        if not data:
+            await interaction.response.send_message("❌ データが見つかりません。", ephemeral=True)
+            return
+
+        if interaction.user.id != data["host_id"] and not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ 募集を終了できるのは募集主か管理者のみです。", ephemeral=True)
+            return
+
+        data["active"] = False
+        self.disable_all()
+
+        embed = create_recruit_embed(data)
+        embed.title = f"【終了】{embed.title}"
+        await interaction.message.edit(embed=embed, view=self)
+        await interaction.response.send_message("🔒 募集を終了しました。", ephemeral=True)
+
+        guild = interaction.guild
+        vc = guild.get_channel(data["vc_id"])
+        if vc:
             try:
-                # 念のため作成者情報やトピックを確認して削除
-                if vc.topic and "作成者:" in vc.topic:
-                    await vc.delete()
+                await vc.delete()
             except Exception:
                 pass
 
+@client.tree.command(name="recruit", description="ゲームのメンバー募集カードと専用VCを作成します")
+async def recruit(interaction: discord.Interaction):
+    await interaction.response.send_modal(RecruitModal())
 
-# --- 読み上げ君（TTS）機能 ---
-@client.tree.command(name="join", description="テキストの読み上げを行うため、あなたのいるボイスチャンネルに参加します")
-async def join(interaction: discord.Interaction):
-    if not interaction.user.voice:
-        await interaction.response.send_message("⚠️ 先にボイスチャンネルに参加してください！", ephemeral=True)
-        return
-
-    vc_channel = interaction.user.voice.channel
-    guild_id = interaction.guild.id
-
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.move_to(vc_channel)
-        await interaction.response.send_message(f"🔊 ボイスチャンネルを {vc_channel.mention} に移動しました！", ephemeral=True)
-    else:
-        try:
-            vc_client = await vc_channel.connect()
-            client.tts_settings[guild_id] = {
-                "voice_channel": vc_channel.id,
-                "voice_client": vc_client,
-                "voice_type": "standard"
-            }
-            await interaction.response.send_message(f"🔊 {vc_channel.mention} に接続し、読み上げを開始します！", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ 接続に失敗しました: {e}", ephemeral=True)
-
-@client.tree.command(name="leave", description="ボイスチャンネルから退出します")
-async def leave(interaction: discord.Interaction):
-    guild_id = interaction.guild.id
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.disconnect()
-        if guild_id in client.tts_settings:
-            del client.tts_settings[guild_id]
-        await interaction.response.send_message("👋 ボイスチャンネルから退出しました。", ephemeral=True)
-    else:
-        await interaction.response.send_message("⚠️ Botはボイスチャンネルに参加していません。", ephemeral=Type if 'Type' in globals() else True)
-
-@client.tree.command(name="voice", description="読み上げの声の種類を変更します")
-@app_commands.describe(voice_type="声の種類を選んでください")
-@app_commands.choices(voice_type=[
-    app_commands.Choice(name="標準（男性風）", value="standard_m"),
-    app_commands.Choice(name="標準（女性風）", value="standard_f"),
-    app_commands.Choice(name="高音・元気", value="high_cheerful"),
-    app_commands.Choice(name="低音・落ち着き", value="low_calm"),
-])
-async def voice(interaction: discord.Interaction, voice_type: str):
-    guild_id = interaction.guild.id
-    if guild_id not in client.tts_settings:
-        client.tts_settings[guild_id] = {}
-    
-    client.tts_settings[guild_id]["voice_type"] = voice_type
-    await interaction.response.send_message(f"🗣️ 読み上げの声の設定を **{voice_type}** に変更しました！", ephemeral=True)
-
-# メッセージ送信時の読み上げ処理
 @client.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-    
-    guild = message.guild
-    if not guild:
-        return
-
-    guild_id = guild.id
-    # BotがVCに参加していて、かつ同じサーバーからのメッセージの場合
-    if guild.voice_client and guild_id in client.tts_settings:
-        # コマンド（スラッシュコマンド等）やプレフィックスメッセージは除外したい場合は調整
-        if message.content.startswith("/"):
-            return
-
-        # ここでTTS（音声合成）処理を行います。
-        # 実環境でGTTSやVOICEVOX、Discordの音声出力ライブラリ(gTTS + ffmpeg等)を紐づけることで読み上げが可能です。
-        # 例: gTTSで音声ファイルを生成して再生するなど
-        print(f"🎤 [読み上げ対象] {message.author.display_name}: {message.content}")
+async def on_voice_state_update(member, before, after):
+    if before.channel is not None and before.channel != after.channel:
+        vc = before.channel
+        if len([m for m in vc.members if not m.bot]) == 0:
+            for msg_id, data in list(active_recruitments.items()):
+                if data["vc_id"] == vc.id:
+                    try:
+                        await vc.delete()
+                    except Exception:
+                        pass
+                    active_recruitments.pop(msg_id, None)
+                    break
 
 
 # ==========================================
-# 📊 1分ごと自動更新ランキング機能（名前表示対応）
+# 📊 1分ごと自動更新ランキング機能
 # ==========================================
 async def create_ranking_embed(guild: discord.Guild, data: dict, bot) -> discord.Embed:
     sorted_users = sorted(
@@ -450,6 +454,7 @@ async def casino(interaction: discord.Interaction, category: discord.CategoryCha
     except discord.Forbidden:
         await interaction.followup.send("⚠️ Botに「チャンネルの管理」権限がないため部屋を作成できませんでした。", ephemeral=True)
 
+
 # ==========================================
 # 共通: ベット額変更フォーム (Modal)
 # ==========================================
@@ -530,6 +535,7 @@ class ChangeBetModal(discord.ui.Modal):
                 ),
                 view=view
             )
+
 
 # ==========================================
 # 1. スロット機能
@@ -640,6 +646,7 @@ async def slot(interaction: discord.Interaction, bet: int):
         f"🎰 **スロット**（賭け金: **{bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
         view=view
     )
+
 
 # ==========================================
 # 2. ブラックジャック機能
@@ -785,6 +792,7 @@ async def bj(interaction: discord.Interaction, bet: int):
         view=view
     )
 
+
 # ==========================================
 # 3. じゃんけん機能
 # ==========================================
@@ -872,6 +880,7 @@ async def janken(interaction: discord.Interaction, bet: int):
     view = JankenView(uid, bet)
     await interaction.followup.send(f"✊✌️✋ **じゃんけん開始**（賭け金: **{bet} pt**）\n手を選んでください！", view=view)
 
+
 # ==========================================
 # 4. 5000pt 高額ガチャ
 # ==========================================
@@ -882,7 +891,7 @@ GACHA_ITEMS = [
     ("🌟 SR: 黄金の塊（大ヒット）", 30000, 6),
     ("💎 R: 宝石の袋（中ヒット）", 15000, 10),
     ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
-    ("☘️ N: トントン（元取り）", 5000, 20),
+    ("☘️ N: トントン（元取り）", 5000, 30),
     ("💸 N: ポケットの穴（ちょっと減少）", 3000, 40),
     ("🍂 N: スリ被害（半分没収）", 1000, 30),
     ("💀 N: 一文無し体験（スカ）", 0, 20),
@@ -955,8 +964,9 @@ async def gacha(interaction: discord.Interaction):
     view = GachaView(uid)
     await interaction.followup.send(embed=embed, view=view)
 
+
 # ==========================================
-# 5. 深海ダイブ機能（酸素回復イベント搭載）
+# 5. 深海ダイブ機能
 # ==========================================
 class DivePlayAgainView(discord.ui.View):
     def __init__(self, user_id, bet):
@@ -1176,8 +1186,9 @@ async def dive(interaction: discord.Interaction, bet: int):
         view=view
     )
 
+
 # ==========================================
-# 6. 廃校探索機能（正気度回復イベント搭載）
+# 6. 廃校探索機能
 # ==========================================
 class HaikouPlayAgainView(discord.ui.View):
     def __init__(self, user_id, bet):
@@ -1394,15 +1405,15 @@ async def haikou(interaction: discord.Interaction, bet: int):
         view=view
     )
 
+
 # ==========================================
-# 7. おみくじ・その他
+# 7. おみくじ・認証・ロール・チケット
 # ==========================================
 @client.tree.command(name="omikuji", description="今日の運勢を占います")
 async def omikuji(interaction: discord.Interaction):
     fortunes = ["大吉 🌟", "中吉 🌸", "小吉 ☘️", "吉 ✨", "末吉 🍃", "凶 ☁️"]
     await interaction.response.send_message(f"⛩️ **おみくじ結果:** 【 **{random.choice(fortunes)}** 】")
 
-# 認証パネル
 class VerifyView(discord.ui.View):
     def __init__(self, role_id: int):
         super().__init__(timeout=None)
@@ -1570,11 +1581,9 @@ async def manual_save(interaction: discord.Interaction):
     except Exception as e:
         await interaction.response.send_message(f"❌ 保存に失敗しました: {e}", ephemeral=True)
 
+
 # ── ボット起動・サーバー処理 ──
 import threading
-
-def run_flask():
-    app.run(host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
