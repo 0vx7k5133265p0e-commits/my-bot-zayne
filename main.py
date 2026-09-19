@@ -1,3 +1,54 @@
+# ==========================================
+# 🔗 各種リンク案内機能
+# ==========================================
+class LinkView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        
+        # 各種リンクボタンの追加（URLは必要に応じて変更してください）
+        self.add_item(discord.ui.Button(
+            label="Bot購入", 
+            style=discord.ButtonStyle.link, 
+            url="https://example.com/buy", 
+            emoji="🛒"
+        ))
+        self.add_item(discord.ui.Button(
+            label="使い方", 
+            style=discord.ButtonStyle.link, 
+            url="https://example.com/guide", 
+            emoji="📖"
+        ))
+        self.add_item(discord.ui.Button(
+            label="サポート", 
+            style=discord.ButtonStyle.link, 
+            url="https://example.com/support", 
+            emoji="🆘"
+        ))
+        self.add_item(discord.ui.Button(
+            label="公式サイト", 
+            style=discord.ButtonStyle.link, 
+            url="https://example.com/", 
+            emoji="🌐"
+        ))
+        self.add_item(discord.ui.Button(
+            label="サポートサーバー", 
+            style=discord.ButtonStyle.link, 
+            url="https://discord.gg/example", 
+            emoji="💬"
+        ))
+
+@client.tree.command(name="link", description="各種リンクや案内パネルを表示します")
+async def link_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🔗 各種リンク",
+        description="Botに関する各種リンク集です。下のボタンからアクセスしてください。",
+        color=0x3498db
+    )
+    view = LinkView()
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("✅ リンクパネルを送信しました！", ephemeral=True)
+
+
 from flask import Flask
 import json
 import random
@@ -888,10 +939,10 @@ GACHA_COST = 5000
 GACHA_ITEMS = [
     ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
     ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 4),
-    ("🌟 SR: 黄金の塊（大ヒット）", 30000, 6),
+    ("🌟 SR: 黄金の塊（大ヒット）", 30000, 5),
     ("💎 R: 宝石の袋（中ヒット）", 15000, 10),
-    ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 20),
-    ("☘️ N: トントン（元取り）", 5000, 30),
+    ("🎁 N: ささやかなお小遣い（小ヒット）", 7000, 30),
+    ("☘️ N: トントン（元取り）", 5000, 20),
     ("💸 N: ポケットの穴（ちょっと減少）", 3000, 40),
     ("🍂 N: スリ被害（半分没収）", 1000, 30),
     ("💀 N: 一文無し体験（スカ）", 0, 20),
