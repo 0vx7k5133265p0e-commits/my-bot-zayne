@@ -1,61 +1,11 @@
-# ==========================================
-# 🔗 各種リンク案内機能
-# ==========================================
-class LinkView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        
-        # 各種リンクボタンの追加（URLは必要に応じて変更してください）
-        self.add_item(discord.ui.Button(
-            label="Bot購入", 
-            style=discord.ButtonStyle.link, 
-            url="https://example.com/buy", 
-            emoji="🛒"
-        ))
-        self.add_item(discord.ui.Button(
-            label="使い方", 
-            style=discord.ButtonStyle.link, 
-            url="https://example.com/guide", 
-            emoji="📖"
-        ))
-        self.add_item(discord.ui.Button(
-            label="サポート", 
-            style=discord.ButtonStyle.link, 
-            url="https://example.com/support", 
-            emoji="🆘"
-        ))
-        self.add_item(discord.ui.Button(
-            label="公式サイト", 
-            style=discord.ButtonStyle.link, 
-            url="https://example.com/", 
-            emoji="🌐"
-        ))
-        self.add_item(discord.ui.Button(
-            label="サポートサーバー", 
-            style=discord.ButtonStyle.link, 
-            url="https://discord.gg/example", 
-            emoji="💬"
-        ))
-
-@client.tree.command(name="link", description="各種リンクや案内パネルを表示します")
-async def link_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🔗 各種リンク",
-        description="Botに関する各種リンク集です。下のボタンからアクセスしてください。",
-        color=0x3498db
-    )
-    view = LinkView()
-    await interaction.channel.send(embed=embed, view=view)
-    await interaction.response.send_message("✅ リンクパネルを送信しました！", ephemeral=True)
-
-
 from flask import Flask
 import json
 import random
 import os
+import shutil
+from datetime import datetime, timedelta
 import traceback
 import asyncio
-from datetime import datetime, timedelta
 import discord
 from discord import app_commands
 
@@ -102,10 +52,27 @@ class FullBot(discord.Client):
 client = FullBot()
 DATA_FILE = "data.json"
 SETTING_FILE = "settings.json"
+BACKUP_DIR = "backups"
 INITIAL_POINTS = 300  # 救済ポイント
 
 # 募集情報を管理する辞書 {message_id: data}
 active_recruitments = {}
+
+# --- 起動時自動バックアップ機能 ---
+def backup_data_file():
+    """プログラム起動時に data.json のバックアップを自動作成する"""
+    if os.path.exists(DATA_FILE):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = os.path.join(BACKUP_DIR, f"data_{timestamp}.json")
+        try:
+            shutil.copy2(DATA_FILE, backup_file)
+            print(f"📦 データのバックアップを作成しました: {backup_file}")
+        except Exception as e:
+            print(f"⚠️ バックアップ作成失敗: {e}")
+
+# 起動時に実行
+backup_data_file()
 
 # --- 安全なデータ管理 ---
 def load_data():
@@ -133,7 +100,7 @@ def save_data(data):
     except Exception as e:
         print(f"⚠️ 保存エラー: {e}")
 
-# --- 設定データ管理（スコアボード設置チャンネル用） ---
+# --- 設定データ管理（スコアボード設置チャンネル用など） ---
 def load_settings():
     if not os.path.exists(SETTING_FILE):
         return {}
@@ -168,6 +135,46 @@ def get_user_data(uid, data: dict) -> dict:
 # --- 専用部屋チェック判定 ---
 def is_casino_room(channel: discord.TextChannel) -> bool:
     return channel.name.startswith("🎰-")
+
+
+# ==========================================
+# 🛒 販売用リンク案内機能 (追加)
+# ==========================================
+class LinkButtonView(discord.ui.View):
+    def __init__(self, label1: str, url1: str, label2: str = None, url2: str = None):
+        super().__init__(timeout=None)
+        if label1 and url1:
+            self.add_item(discord.ui.Button(label=label1, url=url1, style=discord.ButtonStyle.link))
+        if label2 and url2:
+            self.add_item(discord.ui.Button(label=label2, url=url2, style=discord.ButtonStyle.link))
+
+@client.tree.command(name="setup_link", description="指定したURLへのリンクボタン付き案内パネルを設置します（管理者限定）")
+@app_commands.describe(
+    title="パネルのタイトル",
+    description="パネルの説明文",
+    label1="ボタン1の文字（例: 購入ページ）",
+    url1="ボタン1のURL（https://...）",
+    label2="ボタン2の文字（任意）",
+    url2="ボタン2のURL（任意）"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_link(
+    interaction: discord.Interaction,
+    title: str,
+    description: str,
+    label1: str,
+    url1: str,
+    label2: str = None,
+    url2: str = None
+):
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=discord.Color.from_rgb(88, 101, 242)
+    )
+    view = LinkButtonView(label1, url1, label2, url2)
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("✅ リンク案内パネルを設置しました！", ephemeral=True)
 
 
 # ==========================================
