@@ -194,7 +194,7 @@ class RecruitModal(discord.ui.Modal, title="メンバー募集を作成"):
         max_length=50
     )
     max_members = discord.ui.TextInput(
-        label="募集人数 (数字のみ)",
+        label="募集人数 (募集者含めて・数字のみ)",
         placeholder="例: 4",
         required=True,
         max_length=2
