@@ -53,7 +53,7 @@ client = FullBot()
 DATA_FILE = "data.json"
 SETTING_FILE = "settings.json"
 BACKUP_DIR = "backups"
-INITIAL_POINTS = 300  # 救済ポイント
+INITIAL_POINTS = 500  # 救済ポイント
 
 # 募集情報を管理する辞書 {message_id: data}
 active_recruitments = {}
