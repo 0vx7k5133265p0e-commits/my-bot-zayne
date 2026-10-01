@@ -596,18 +596,150 @@ class ChangeBetModal(discord.ui.Modal):
 
 
 # ==========================================
-# 1. スロット機能（順番にリールを止めるストップ式・コンパクトボタン）
+# 1. スロット機能（一発式 ＆ 順番に止めるストップ式）
 # ==========================================
-SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍉", "💎"]
+SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍊", "🍉", "💎"]
 
-class SlotGameView(discord.ui.View):
+# --- A. 一回で結果が出る通常スロット (/slot) ---
+class SlotView(discord.ui.View):
+    def __init__(self, user_id, bet):
+        super().__init__(timeout=None)
+        self.user_id = str(user_id)
+        self.bet = bet
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("⚠️ あなたのゲーム画面ではありません！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="🎰 もう一度", style=discord.ButtonStyle.success)
+    async def spin_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        data = load_data()
+        user_info = get_user_data(self.user_id, data)
+
+        if user_info["points"] < self.bet:
+            user_info["points"] = INITIAL_POINTS
+            save_data(data)
+            await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度ボタンを押してください。", ephemeral=True)
+            return
+
+        pekari_msg = ""
+        if user_info["pekari_stock"] > 0:
+            user_info["pekari_stock"] -= 1
+            sym = random.choice(SLOT_SYMBOLS)
+            reels = [sym, sym, sym]
+            multiplier = 25 if sym == "7️⃣" else 10
+            payout = int(self.bet * multiplier)
+            user_info["points"] += (payout - self.bet)
+            rem = user_info["pekari_stock"]
+            pekari_msg = f"🔥 **ペカり確変中！** 3つ揃い確定！（残り確変: **{rem}回**）\n"
+            msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
+        else:
+            is_pekari = random.random() < 0.007
+            if is_pekari:
+                user_info["pekari_stock"] = 3
+                pekari_msg = "💡 **GOGO! CHANCE** 💡\n✨ **ペカッた！次回から3回連続で3つ揃い確定！**\n"
+
+            reels = random.choices(SLOT_SYMBOLS, k=3)
+            if reels[0] == reels[1] == reels[2]:
+                multiplier = 25 if reels[0] == "7️⃣" else 10
+                payout = int(self.bet * multiplier)
+                user_info["points"] += (payout - self.bet)
+                msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
+            elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
+                payout = int(self.bet * 2)
+                user_info["points"] += (payout - self.bet)
+                msg = f"{pekari_msg}✨ **プチ当たり！2つ揃い（2倍）！** **+{payout} pt**"
+            else:
+                user_info["points"] -= self.bet
+                msg = f"{pekari_msg}😭 **ハズレ...** **-{self.bet} pt**"
+
+        save_data(data)
+        await interaction.message.edit(
+            content=f"🎰 **スロット（一発式）**（賭け金: **{self.bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
+            view=self
+        )
+
+    @discord.ui.button(label="💰 賭け金変更", style=discord.ButtonStyle.secondary)
+    async def change_bet(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = load_data()
+        user_info = get_user_data(self.user_id, data)
+        if user_info.get("pekari_stock", 0) > 0:
+            await interaction.response.send_message("⚠️ **ペカり確変中は賭け金を変更できません！**", ephemeral=True)
+            return
+        await interaction.response.send_modal(ChangeBetModal("slot", self.user_id))
+
+@client.tree.command(name="slot", description="スロットを1回で回します（専用カジノ部屋限定）")
+@app_commands.describe(bet="賭けるポイント数")
+async def slot(interaction: discord.Interaction, bet: int):
+    if not is_casino_room(interaction.channel):
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
+        return
+    await interaction.response.defer()
+    data = load_data()
+    uid = str(interaction.user.id)
+    user_info = get_user_data(uid, data)
+
+    if user_info["points"] < bet:
+        user_info["points"] = INITIAL_POINTS
+        save_data(data)
+        await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度 `/slot` を実行してください。", ephemeral=True)
+        return
+
+    if bet <= 0:
+        await interaction.followup.send("⚠️ 1pt以上を指定してください。", ephemeral=True)
+        return
+
+    pekari_msg = ""
+    if user_info["pekari_stock"] > 0:
+        user_info["pekari_stock"] -= 1
+        sym = random.choice(SLOT_SYMBOLS)
+        reels = [sym, sym, sym]
+        multiplier = 25 if sym == "7️⃣" else 10
+        payout = int(bet * multiplier)
+        user_info["points"] += (payout - bet)
+        rem = user_info["pekari_stock"]
+        pekari_msg = f"🔥 **ペカり確変中！** 3つ揃い確定！（残り確変: **{rem}回**）\n"
+        msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
+    else:
+        is_pekari = random.random() < 0.007
+        if is_pekari:
+            user_info["pekari_stock"] = 3
+            pekari_msg = "💡 **GOGO! CHANCE** 💡\n✨ **ペカッた！次回から3回連続で3つ揃い確定！**\n"
+
+        reels = random.choices(SLOT_SYMBOLS, k=3)
+        if reels[0] == reels[1] == reels[2]:
+            multiplier = 25 if reels[0] == "7️⃣" else 10
+            payout = int(bet * multiplier)
+            user_info["points"] += (payout - bet)
+            msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
+        elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
+            payout = int(bet * 2)
+            user_info["points"] += (payout - bet)
+            msg = f"{pekari_msg}✨ **プチ当たり！2つ揃い（2倍）！** **+{payout} pt**"
+        else:
+            user_info["points"] -= bet
+            msg = f"{pekari_msg}😭 **ハズレ...** **-{bet} pt**"
+
+    save_data(data)
+    view = SlotView(uid, bet)
+    await interaction.followup.send(
+        f"🎰 **スロット（一発式）**（賭け金: **{bet} pt**）\n│ {reels[0]} │ {reels[1]} │ {reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
+        view=view
+    )
+
+
+# --- B. 順番に止めるストップ式スロット (/stopslot) ---
+class StopSlotGameView(discord.ui.View):
     def __init__(self, user_id: str, bet: int):
         super().__init__(timeout=180)
         self.user_id = str(user_id)
         self.bet = bet
         
         self.reels = ["❓", "❓", "❓"]
-        self.stopped = [False, False, False] # 0:左, 1:中, 2:右
+        self.stopped = [False, False, False]
         
         data = load_data()
         user_info = get_user_data(self.user_id, data)
@@ -636,7 +768,6 @@ class SlotGameView(discord.ui.View):
         self.reel2_btn.disabled = self.stopped[1]
         self.reel3_btn.disabled = self.stopped[2]
 
-    # ラベルを短くしてコンパクトにしています
     @discord.ui.button(label="左 🛑", style=discord.ButtonStyle.primary, custom_id="stop_reel_1")
     async def reel1_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
@@ -664,7 +795,7 @@ class SlotGameView(discord.ui.View):
     async def check_completion(self, interaction: discord.Interaction):
         if not all(self.stopped):
             await interaction.message.edit(
-                content=f"🎰 **スロット**（賭け金: **{self.bet} pt**）\n│ {self.reels[0]} │ {self.reels[1]} │ {self.reels[2]} │\n\n残りのリールを止めてください👇",
+                content=f"🎰 **ストップ式スロット**（賭け金: **{self.bet} pt**）\n│ {self.reels[0]} │ {self.reels[1]} │ {self.reels[2]} │\n\n残りのリールを止めてください👇",
                 view=self
             )
             return
@@ -694,7 +825,6 @@ class SlotGameView(discord.ui.View):
         from discord.ui import Button
         self.clear_items()
         
-        # もう一度遊ぶボタン
         again_btn = Button(label="🎰 もう一度", style=discord.ButtonStyle.success)
         async def play_again_callback(i: discord.Interaction):
             if str(i.user.id) != self.user_id:
@@ -708,15 +838,14 @@ class SlotGameView(discord.ui.View):
                 save_data(d)
                 await i.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度試してください。", ephemeral=True)
                 return
-            new_view = SlotGameView(self.user_id, self.bet)
+            new_view = StopSlotGameView(self.user_id, self.bet)
             await i.message.edit(
-                content=f"🎰 **スロット**（賭け金: **{self.bet} pt**）\n│ ❓ │ ❓ │ ❓ │\n\nボタンを押してリールを止めてください👇",
+                content=f"🎰 **ストップ式スロット**（賭け金: **{self.bet} pt**）\n│ ❓ │ ❓ │ ❓ │\n\nボタンを押してリールを止めてください👇",
                 view=new_view
             )
         again_btn.callback = play_again_callback
         self.add_item(again_btn)
 
-        # 賭け金変更ボタン
         bet_btn = Button(label="💰 賭け金変更", style=discord.ButtonStyle.secondary)
         async def change_bet_callback(i: discord.Interaction):
             if str(i.user.id) != self.user_id:
@@ -727,18 +856,18 @@ class SlotGameView(discord.ui.View):
             if u_info.get("pekari_stock", 0) > 0:
                 await i.response.send_message("⚠️ **ペカり確変中は賭け金を変更できません！**", ephemeral=True)
                 return
-            await i.response.send_modal(ChangeBetModal("slot", self.user_id))
+            await i.response.send_modal(ChangeBetModal("stopslot", self.user_id))
         bet_btn.callback = change_bet_callback
         self.add_item(bet_btn)
 
         await interaction.message.edit(
-            content=f"🎰 **スロット結果**（賭け金: **{self.bet} pt**）\n│ {self.reels[0]} │ {self.reels[1]} │ {self.reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
+            content=f"🎰 **ストップ式スロット結果**（賭け金: **{self.bet} pt**）\n│ {self.reels[0]} │ {self.reels[1]} │ {self.reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
             view=self
         )
 
-@client.tree.command(name="slot", description="スロットを順番に止めて回します（専用カジノ部屋限定）")
+@client.tree.command(name="stopslot", description="リールを順番に止めるストップ式スロットを回します（専用カジノ部屋限定）")
 @app_commands.describe(bet="賭けるポイント数")
-async def slot(interaction: discord.Interaction, bet: int):
+async def stopslot(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
         await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
         return
@@ -750,16 +879,16 @@ async def slot(interaction: discord.Interaction, bet: int):
     if user_info["points"] < bet:
         user_info["points"] = INITIAL_POINTS
         save_data(data)
-        await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度 `/slot` を実行してください。", ephemeral=True)
+        await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度 `/stopslot` を実行してください。", ephemeral=True)
         return
 
     if bet <= 0:
         await interaction.followup.send("⚠️ 1pt以上を指定してください。", ephemeral=True)
         return
 
-    view = SlotGameView(uid, bet)
+    view = StopSlotGameView(uid, bet)
     await interaction.followup.send(
-        f"🎰 **スロット**（賭け金: **{bet} pt**）\n│ ❓ │ ❓ │ ❓ │\n\nボタンの文字を短くしてコンパクトにしました👇",
+        f"🎰 **ストップ式スロット**（賭け金: **{bet} pt**）\n│ ❓ │ ❓ │ ❓ │\n\nボタンを押してリールを止めてください👇",
         view=view
     )
 # ==========================================
