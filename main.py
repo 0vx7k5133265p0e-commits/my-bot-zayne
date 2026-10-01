@@ -598,7 +598,7 @@ class ChangeBetModal(discord.ui.Modal):
 # ==========================================
 # 1. スロット機能
 # ==========================================
-SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍊", "🍉", "💎"]
+SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍉", "💎"]
 
 def process_slot_spin(uid: str, bet: int, data: dict):
     user_info = get_user_data(uid, data)
