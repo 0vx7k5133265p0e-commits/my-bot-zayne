@@ -596,10 +596,11 @@ class ChangeBetModal(discord.ui.Modal):
 
 
 # ==========================================
-# 1. スロット機能
+# 1. スロット機能（一発勝負式 ＆ ストップ式）
 # ==========================================
 SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍉", "💎"]
 
+# --- 共通の処理関数 ---
 def process_slot_spin(uid: str, bet: int, data: dict):
     user_info = get_user_data(uid, data)
     pekari_msg = ""
@@ -636,6 +637,8 @@ def process_slot_spin(uid: str, bet: int, data: dict):
 
     return reels, msg
 
+
+# --- A. 一回で結果が出る通常スロット (/slot) ---
 class SlotView(discord.ui.View):
     def __init__(self, user_id, bet):
         super().__init__(timeout=None)
@@ -676,7 +679,7 @@ class SlotView(discord.ui.View):
             return
         await interaction.response.send_modal(ChangeBetModal("slot", self.user_id))
 
-@client.tree.command(name="slot", description="スロットを回します（専用カジノ部屋限定）")
+@client.tree.command(name="slot", description="スロットを1回で回します（専用カジノ部屋限定）")
 @app_commands.describe(bet="賭けるポイント数")
 async def slot(interaction: discord.Interaction, bet: int):
     if not is_casino_room(interaction.channel):
@@ -706,6 +709,166 @@ async def slot(interaction: discord.Interaction, bet: int):
     )
 
 
+# --- B. 順番に止めるストップ式スロット (/stopslot) ---
+class StopSlotGameView(discord.ui.View):
+    def __init__(self, user_id: str, bet: int):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+        self.bet = bet
+        
+        self.reels = ["❓", "❓", "❓"]
+        self.stopped = [False, False, False]
+        
+        data = load_data()
+        user_info = get_user_data(self.user_id, data)
+        
+        if user_info.get("pekari_stock", 0) > 0:
+            user_info["pekari_stock"] -= 1
+            save_data(data)
+            sym = random.choice(SLOT_SYMBOLS)
+            self.final_reels = [sym, sym, sym]
+            self.is_pekari_active = True
+        else:
+            self.is_pekari_active = random.random() < 0.007
+            if self.is_pekari_active:
+                user_info["pekari_stock"] = 3
+                save_data(data)
+            self.final_reels = random.choices(SLOT_SYMBOLS, k=3)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("⚠️️ あなたのゲーム画面ではありません！", ephemeral=True)
+            return False
+        return True
+
+    def update_buttons(self):
+        self.reel1_btn.disabled = self.stopped[0]
+        self.reel2_btn.disabled = self.stopped[1]
+        self.reel3_btn.disabled = self.stopped[2]
+
+    @discord.ui.button(label="🛑 左を止める", style=discord.ButtonStyle.primary, custom_id="stop_reel_1")
+    async def reel1_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        self.reels[0] = self.final_reels[0]
+        self.stopped[0] = True
+        self.update_buttons()
+        await self.check_completion(interaction)
+
+    @discord.ui.button(label="🛑 中を止める", style=discord.ButtonStyle.primary, custom_id="stop_reel_2")
+    async def reel2_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        self.reels[1] = self.final_reels[1]
+        self.stopped[1] = True
+        self.update_buttons()
+        await self.check_completion(interaction)
+
+    @discord.ui.button(label="🛑 右を止める", style=discord.ButtonStyle.primary, custom_id="stop_reel_3")
+    async def reel3_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        self.reels[2] = self.final_reels[2]
+        self.stopped[2] = True
+        self.update_buttons()
+        await self.check_completion(interaction)
+
+    async def check_completion(self, interaction: discord.Interaction):
+        if not all(self.stopped):
+            await interaction.message.edit(
+                content=f"🎰 **ストップ式スロット**（賭け金: **{self.bet} pt**）\n│ {self.reels[0]} │ {self.reels[1]} │ {self.reels[2]} │\n\n残りのリールを止めてください👇",
+                view=self
+            )
+            return
+
+        data = load_data()
+        user_info = get_user_data(self.user_id, data)
+        pekari_msg = ""
+
+        if self.is_pekari_active:
+            pekari_msg = "💡 **GOGO! CHANCE** 💡\n✨ **ペカッた！次回から3回連続で3つ揃い確定！**\n"
+
+        if self.reels[0] == self.reels[1] == self.reels[2]:
+            multiplier = 25 if self.reels[0] == "7️⃣" else 10
+            payout = int(self.bet * multiplier)
+            user_info["points"] += (payout - self.bet)
+            msg = f"{pekari_msg}🎉 **超特大ヒット！3つ揃い（{multiplier}倍）！** **+{payout} pt**"
+        elif self.reels[0] == self.reels[1] or self.reels[1] == self.reels[2] or self.reels[0] == self.reels[2]:
+            payout = int(self.bet * 2)
+            user_info["points"] += (payout - self.bet)
+            msg = f"{pekari_msg}✨ **プチ当たり！2つ揃い（2倍）！** **+{payout} pt**"
+        else:
+            user_info["points"] -= self.bet
+            msg = f"{pekari_msg}😭 **ハズレ...** **-{self.bet} pt**"
+
+        save_data(data)
+
+        from discord.ui import Button
+        self.clear_items()
+        
+        again_btn = Button(label="🎰 もう一度ストップ式で遊ぶ", style=discord.ButtonStyle.success)
+        async def play_again_callback(i: discord.Interaction):
+            if str(i.user.id) != self.user_id:
+                await i.response.send_message("⚠️ あなたのゲーム画面ではありません！", ephemeral=True)
+                return
+            await i.response.defer()
+            d = load_data()
+            u_info = get_user_data(self.user_id, d)
+            if u_info["points"] < self.bet:
+                u_info["points"] = INITIAL_POINTS
+                save_data(d)
+                await i.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度試してください。", ephemeral=True)
+                return
+            new_view = StopSlotGameView(self.user_id, self.bet)
+            await i.message.edit(
+                content=f"🎰 **ストップ式スロット**（賭け金: **{self.bet} pt**）\n│ ❓ │ ❓ │ ❓ │\n\nボタンを押してリールを止めてください👇",
+                view=new_view
+            )
+        again_btn.callback = play_again_callback
+        self.add_item(again_btn)
+
+        bet_btn = Button(label="💰 賭け金を変更", style=discord.ButtonStyle.secondary)
+        async def change_bet_callback(i: discord.Interaction):
+            if str(i.user.id) != self.user_id:
+                await i.response.send_message("⚠️ あなたのゲーム画面ではありません！", ephemeral=True)
+                return
+            d = load_data()
+            u_info = get_user_data(self.user_id, d)
+            if u_info.get("pekari_stock", 0) > 0:
+                await i.response.send_message("⚠️ **ペカり確変中は賭け金を変更できません！**", ephemeral=True)
+                return
+            await i.response.send_modal(ChangeBetModal("stopslot", self.user_id))
+        bet_btn.callback = change_bet_callback
+        self.add_item(bet_btn)
+
+        await interaction.message.edit(
+            content=f"🎰 **ストップ式スロット結果**（賭け金: **{self.bet} pt**）\n│ {self.reels[0]} │ {self.reels[1]} │ {self.reels[2]} │\n\n{msg}（所持: **{user_info['points']} pt**）",
+            view=self
+        )
+
+@client.tree.command(name="stopslot", description="リールを順番に止めるストップ式スロットを回します（専用カジノ部屋限定）")
+@app_commands.describe(bet="賭けるポイント数")
+async def stopslot(interaction: discord.Interaction, bet: int):
+    if not is_casino_room(interaction.channel):
+        await interaction.response.send_message("⚠️ カジノゲームは専用部屋の中でのみ遊べます！", ephemeral=True)
+        return
+    await interaction.response.defer()
+    data = load_data()
+    uid = str(interaction.user.id)
+    user_info = get_user_data(uid, data)
+
+    if user_info["points"] < bet:
+        user_info["points"] = INITIAL_POINTS
+        save_data(data)
+        await interaction.followup.send(f"💰 ポイント不足のため **{INITIAL_POINTS} pt** 補給しました！もう一度 `/stopslot` を実行してください。", ephemeral=True)
+        return
+
+    if bet <= 0:
+        await interaction.followup.send("⚠️ 1pt以上を指定してください。", ephemeral=True)
+        return
+
+    view = StopSlotGameView(uid, bet)
+    await interaction.followup.send(
+        f"🎰 **ストップ式スロット**（賭け金: **{bet} pt**）\n│ ❓ │ ❓ │ ❓ │\n\nボタンを押してリールを止めてください👇",
+        view=view
+    )
 # ==========================================
 # 2. ブラックジャック機能
 # ==========================================
