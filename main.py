@@ -598,7 +598,7 @@ class ChangeBetModal(discord.ui.Modal):
 # ==========================================
 # 1. スロット機能（順番にリールを止めるストップ式・コンパクトボタン）
 # ==========================================
-SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍊", "🍉", "💎"]
+SLOT_SYMBOLS = ["🍒", "🔔", "🍇", "7️⃣", "🍉", "💎"]
 
 class SlotGameView(discord.ui.View):
     def __init__(self, user_id: str, bet: int):
