@@ -53,7 +53,7 @@ client = FullBot()
 DATA_FILE = "data.json"
 SETTING_FILE = "settings.json"
 BACKUP_DIR = "backups"
-INITIAL_POINTS = 5000  # 救済ポイント
+INITIAL_POINTS = 500  # 救済ポイント
 
 # 募集情報を管理する辞書 {message_id: data}
 active_recruitments = {}
@@ -1129,7 +1129,7 @@ async def janken(interaction: discord.Interaction, bet: int):
 # ==========================================
 GACHA_COST = 5000
 GACHA_ITEMS = [
-    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 100),
+    ("🌈 UR: 神々の祝福（超絶特大ヒット！）", 500000, 1),
     ("✨ SSR: 伝説の秘宝（超大ヒット！）", 100000, 4),
     ("🌟 SR: 黄金の塊（大ヒット）", 30000, 5),
     ("💎 R: 宝石の袋（中ヒット）", 15000, 10),
