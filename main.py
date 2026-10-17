@@ -183,7 +183,7 @@ async def setup_link(
 class RecruitModal(discord.ui.Modal, title="メンバー募集を作成"):
     game_title = discord.ui.TextInput(
         label="ゲームタイトル",
-        placeholder="例: Minecraft, VALORANT など",
+        placeholder="例: Minecraft, ランダムダイス など",
         required=True,
         max_length=50
     )
